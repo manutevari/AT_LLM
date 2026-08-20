@@ -30,37 +30,54 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.divider()
-left, right = st.columns([1.05, 0.95], gap="large")
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "latest_result" not in st.session_state:
+    st.session_state.latest_result = None
 
-with left:
-    st.subheader("Launch an architecture-aligned run")
-    query = st.text_area(
-        "Describe the mission",
-        placeholder="Example: Design a policy-first RAG workflow for regulated support tickets with Tableau audit dashboards.",
-        height=180,
-    )
-    c1, c2 = st.columns(2)
-    channel = c1.selectbox("Channel", [item.value for item in Channel], index=0)
-    tenant_id = c2.text_input("Tenant", value="default")
-    run_clicked = st.button("Run Control Plane", type="primary", use_container_width=True, disabled=not query.strip())
-
-with right:
+with st.sidebar:
+    st.subheader("Session Settings")
+    channel = st.selectbox("Channel", [item.value for item in Channel], index=0)
+    tenant_id = st.text_input("Tenant", value="default")
+    st.divider()
     st.subheader("Route catalog")
     for route in ROUTES:
         st.markdown(f"<span class='pill'>{route.name}</span> **{route.domain}** — {route.description}", unsafe_allow_html=True)
 
-if run_clicked:
-    with st.spinner("Session → contracts → signals → routing → governance → audit..."):
-        result = asyncio.run(run_agent(query, channel=Channel(channel), tenant_id=tenant_id))
+st.divider()
+left, right = st.columns([1.05, 0.95], gap="large")
 
-    st.success("Control-plane run completed")
-    a, b, c, d, e = st.columns(5)
-    a.metric("Route", result.route)
-    b.metric("Confidence", f"{result.confidence:.0%}")
-    c.metric("Risk", result.route_contract.risk.value.title())
-    d.metric("Gate", result.production_gate)
-    e.metric("Audit Events", len(result.audit_events))
+with left:
+    st.subheader("Agent Chat")
+    
+    # Display chat messages
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    # Chat input
+    if prompt := st.chat_input("Describe the mission..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.write(prompt)
+            
+        with st.chat_message("assistant"):
+            with st.spinner("Session → contracts → signals → routing → governance → audit..."):
+                result = asyncio.run(run_agent(prompt, channel=Channel(channel), tenant_id=tenant_id, history=st.session_state.messages[:-1]))
+                st.session_state.latest_result = result
+                st.write(result.answer)
+        st.session_state.messages.append({"role": "assistant", "content": result.answer})
+        st.rerun()
+
+with right:
+    st.subheader("Control Plane Observability")
+    if result := st.session_state.latest_result:
+        a, b, c, d, e = st.columns(5)
+        a.metric("Route", result.route)
+        b.metric("Confidence", f"{result.confidence:.0%}")
+        c.metric("Risk", result.route_contract.risk.value.title())
+        d.metric("Gate", result.production_gate)
+        e.metric("Audit Events", len(result.audit_events))
 
     tabs = st.tabs(["Response", "Contracts", "Routing", "Evidence", "Audit"])
     with tabs[0]:
@@ -70,12 +87,8 @@ if run_clicked:
         st.json(
             {
                 "input": result.input_contract.model_dump(mode="json"),
-                "runtime_state": result.runtime_state.model_dump(mode="json"),
                 "intent": result.intent_contract.model_dump(mode="json"),
                 "signals": result.signal_contract.model_dump(mode="json"),
-                "policy": result.policy_contract.model_dump(mode="json"),
-                "plan": result.plan_contract.model_dump(mode="json"),
-                "verification": result.verification_contract.model_dump(mode="json"),
             }
         )
     with tabs[2]:

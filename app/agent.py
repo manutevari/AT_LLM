@@ -311,32 +311,31 @@ def _compose_answer(
     route: RouteContract,
     plan: PlanContract,
     verification: VerificationContract,
+    history: list[dict] | None = None,
 ) -> tuple[str, str, bool]:
     verified = verification.verdict != EdgeDecision.blocked
     gate = "BLOCK" if verification.verdict == EdgeDecision.blocked else "CONDITIONAL" if verification.verdict == EdgeDecision.escalate else "PASS"
     status = "passed validation" if verified else "blocked by validation"
     review_note = " Human review is recommended before production execution." if gate == "CONDITIONAL" else " Automated execution is permitted for this demo run."
-def _compose_answer(input_contract: InputContract, route: RouteContract, decisions: list[DecisionContract]) -> tuple[str, str, bool]:
-    blocking = [decision for decision in decisions if decision.decision in {EdgeDecision.blocked, EdgeDecision.escalate}]
-    verified = not any(decision.decision == EdgeDecision.blocked for decision in decisions)
-    gate = "CONDITIONAL" if blocking else "PASS"
-    status = "passed validation" if verified else "blocked by validation"
-    review_note = " Human review is recommended before production execution." if blocking else " Automated execution is permitted for this demo run."
+    
+    intro = "I've analyzed your follow-up request." if history else "I've processed your mission."
+    
     answer = (
-        f"Architecture-aligned route: {route.route} in the {route.domain} domain. "
-        f"Topology: {route.topology.value}; assigned agent: {route.agent}; model policy: {route.model}. "
-        f"Policy Manager verdict: {policy.verdict.value}; constraints: {', '.join(policy.constraints)}. "
-        f"Manager fabric: {', '.join(plan.manager_fabric)}. "
-        f"Tools planned: {', '.join(route.tools)}. "
-        f"Data classification: {route.data_classification.value}; risk: {route.risk.value}. "
-        f"Verification verdict: {verification.verdict.value}; runtime state: {runtime_state.state_id}. "
-        f"Execution status: {status}; production gate: {gate}.{review_note}\n\n"
-        f"Normalized request: {input_contract.query}"
+        f"{intro}\n\n"
+        f"**Architecture-aligned route:** {route.route} in the {route.domain} domain.\n"
+        f"**Topology:** {route.topology.value} | **Assigned agent:** {route.agent} | **Model policy:** {route.model}.\n"
+        f"**Policy Manager verdict:** {policy.verdict.value} | **Constraints:** {', '.join(policy.constraints)}.\n"
+        f"**Manager fabric:** {', '.join(plan.manager_fabric)}.\n"
+        f"**Tools planned:** {', '.join(route.tools)}.\n"
+        f"**Data classification:** {route.data_classification.value} | **Risk:** {route.risk.value}.\n"
+        f"**Verification verdict:** {verification.verdict.value} | **Runtime state:** {runtime_state.state_id}.\n"
+        f"**Execution status:** {status} | **Production gate:** {gate}.{review_note}\n\n"
+        f"*Normalized request:* {input_contract.query}"
     )
     return answer, gate, verified
 
 
-async def run_agent(query: str, channel: Channel = Channel.web, tenant_id: str = "default") -> AgentResult:
+async def run_agent(query: str, channel: Channel = Channel.web, tenant_id: str = "default", history: list[dict] | None = None) -> AgentResult:
     """Run the local async control-plane workflow for a single query."""
 
     await asyncio.sleep(0)
@@ -351,7 +350,7 @@ async def run_agent(query: str, channel: Channel = Channel.web, tenant_id: str =
     decisions = _edge_decisions(intent, signals, route, policy)
     evidence = _evidence(route)
     verification = _verify(decisions, evidence, route)
-    answer, production_gate, verified = _compose_answer(input_contract, runtime_state, policy, route, plan, verification)
+    answer, production_gate, verified = _compose_answer(input_contract, runtime_state, policy, route, plan, verification, history)
     audit_events = _audit(
         ("session_manager", "ok", f"Session {input_contract.session_id} opened for tenant {input_contract.tenant_id}."),
         ("input_normalization", "ok", "Whitespace normalized and channel metadata captured."),
