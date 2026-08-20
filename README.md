@@ -10,6 +10,17 @@ A full-fledged FastAPI + Streamlit starter for deterministic AI-agent orchestrat
 - **FastAPI endpoint** for `/health` and `/agent` requests, compatible with the existing Vercel configuration.
 - **Reference architecture documentation** in `docs/architecture.md` with the implemented Mermaid flow and extension points.
 - **Pytest coverage** for route classification, auditable result behavior, ambiguity escalation, and high-risk governance.
+# AI Agent Platform — Full-Fledged Control-Plane Demo
+
+A polished FastAPI + Streamlit starter for deterministic AI-agent orchestration. The app now includes a local agent runtime, route classification, validation checks, auditable execution steps, a Streamlit console, and a deployable FastAPI entrypoint.
+
+## What is included
+
+- **Streamlit operator console** for launching agent runs, viewing route confidence, validation status, and audit events.
+- **Deterministic agent runtime** with intent classification across Research, Build, Analyze, and Support workflows.
+- **Stable response contract** shared by the UI and API.
+- **FastAPI endpoint** for `/health` and `/agent` requests, compatible with the existing Vercel configuration.
+- **Pytest coverage** for route classification and auditable result generation.
 
 ## Setup
 
@@ -42,3 +53,9 @@ curl -X POST http://127.0.0.1:8000/agent \
 ## Production notes
 
 This repository is a runnable control-plane foundation. Production deployments should add persistent PostgreSQL + pgvector storage, object storage, authenticated tenants, provider-specific model/tool adapters, rate limiting, LangGraph/Ruflo execution adapters, Tableau governed views, and environment-specific observability.
+  -d '{"query":"Design and build an API feature"}'
+```
+
+## Notes
+
+This repository is a runnable control-plane foundation. Production deployments should add persistent audit storage, authenticated users, provider-specific tool adapters, rate limiting, and environment-specific observability.

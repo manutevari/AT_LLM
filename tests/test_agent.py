@@ -35,3 +35,5 @@ def test_high_risk_request_requires_human_review():
     assert result.route_contract.requires_human_review is True
     assert result.route_contract.risk.value == "high"
     assert result.route_contract.data_classification.value == "regulated"
+    assert result.steps
+    assert "Execution status" in result.answer
