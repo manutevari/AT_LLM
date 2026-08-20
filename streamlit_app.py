@@ -70,8 +70,12 @@ if run_clicked:
         st.json(
             {
                 "input": result.input_contract.model_dump(mode="json"),
+                "runtime_state": result.runtime_state.model_dump(mode="json"),
                 "intent": result.intent_contract.model_dump(mode="json"),
                 "signals": result.signal_contract.model_dump(mode="json"),
+                "policy": result.policy_contract.model_dump(mode="json"),
+                "plan": result.plan_contract.model_dump(mode="json"),
+                "verification": result.verification_contract.model_dump(mode="json"),
             }
         )
     with tabs[2]:
