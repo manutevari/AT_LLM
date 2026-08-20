@@ -316,6 +316,12 @@ def _compose_answer(
     gate = "BLOCK" if verification.verdict == EdgeDecision.blocked else "CONDITIONAL" if verification.verdict == EdgeDecision.escalate else "PASS"
     status = "passed validation" if verified else "blocked by validation"
     review_note = " Human review is recommended before production execution." if gate == "CONDITIONAL" else " Automated execution is permitted for this demo run."
+def _compose_answer(input_contract: InputContract, route: RouteContract, decisions: list[DecisionContract]) -> tuple[str, str, bool]:
+    blocking = [decision for decision in decisions if decision.decision in {EdgeDecision.blocked, EdgeDecision.escalate}]
+    verified = not any(decision.decision == EdgeDecision.blocked for decision in decisions)
+    gate = "CONDITIONAL" if blocking else "PASS"
+    status = "passed validation" if verified else "blocked by validation"
+    review_note = " Human review is recommended before production execution." if blocking else " Automated execution is permitted for this demo run."
     answer = (
         f"Architecture-aligned route: {route.route} in the {route.domain} domain. "
         f"Topology: {route.topology.value}; assigned agent: {route.agent}; model policy: {route.model}. "
