@@ -10,7 +10,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, field_validator
 
 
-CONTRACT_VERSION = "2026-08-20.v1"
+CONTRACT_VERSION = "2026-08-20.v2"
 
 
 class Channel(str, Enum):
@@ -73,6 +73,16 @@ class InputContract(BaseModel):
         return " ".join(value.strip().split())
 
 
+class RuntimeStateContract(BaseModel):
+    interaction_manager: str
+    session_manager: str
+    context_manager: str
+    ambiguity_manager: str
+    operations_manager: str
+    state_id: str = Field(default_factory=lambda: f"state_{uuid4().hex[:12]}")
+    invariants: list[str]
+
+
 class IntentContract(BaseModel):
     intent: str
     lifecycle: str
@@ -95,6 +105,14 @@ class SignalContract(BaseModel):
     policy_score: float = Field(ge=0, le=1)
 
 
+class PolicyContract(BaseModel):
+    verdict: EdgeDecision
+    authority: str = "POLICY MANAGER"
+    constraints: list[str] = Field(default_factory=list)
+    requires_human_review: bool = False
+    reason: str
+
+
 class RouteContract(BaseModel):
     route: str
     domain: str
@@ -109,6 +127,14 @@ class RouteContract(BaseModel):
     risk: RiskLevel
 
 
+class PlanContract(BaseModel):
+    intelligence_agent: str
+    candidate_plan: list[str]
+    orchestrator: str
+    supervisor: str
+    manager_fabric: list[str]
+
+
 class DecisionContract(BaseModel):
     edge: str
     decision: EdgeDecision
@@ -120,6 +146,19 @@ class EvidenceContract(BaseModel):
     retrieval_method: str
     relevance: float = Field(ge=0, le=1)
     confidence: float = Field(ge=0, le=1)
+    provenance: str = "provenance-managed"
+    freshness_required: bool = False
+
+
+class VerificationContract(BaseModel):
+    evidence: EdgeDecision
+    policy: EdgeDecision
+    factual_consistency: EdgeDecision
+    citations: EdgeDecision
+    risk: EdgeDecision
+    format: EdgeDecision
+    verdict: EdgeDecision
+    repairs: list[str] = Field(default_factory=list)
 
 
 class AuditEvent(BaseModel):
@@ -135,11 +174,15 @@ class AgentResult(BaseModel):
     confidence: float = Field(ge=0, le=1)
     verified: bool
     input_contract: InputContract
+    runtime_state: RuntimeStateContract
     intent_contract: IntentContract
     signal_contract: SignalContract
+    policy_contract: PolicyContract
     route_contract: RouteContract
+    plan_contract: PlanContract
     decisions: list[DecisionContract]
     evidence: list[EvidenceContract]
+    verification_contract: VerificationContract
     audit_events: list[AuditEvent]
     response_governance: list[str]
     production_gate: str

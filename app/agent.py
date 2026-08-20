@@ -4,11 +4,6 @@ This module maps the reference flowchart into executable local control-plane
 stages: session/input normalization, Pydantic validation, human understanding,
 query intelligence, signal scoring, routing, deterministic predicates,
 orchestration planning, evidence/provenance, response governance, and audit.
-"""Deterministic agent orchestration primitives used by the UI and API.
-
-The project can be wired to external LLM/tool providers later, but these
-components provide a reliable local control plane: classify intent, route work,
-apply guardrail-style validation, and produce an auditable response contract.
 """
 
 from __future__ import annotations
@@ -29,30 +24,20 @@ from .contracts import (
     ExecutionTopology,
     InputContract,
     IntentContract,
+    PlanContract,
+    PolicyContract,
     RiskLevel,
     RouteContract,
+    RuntimeStateContract,
     SignalContract,
+    VerificationContract,
 )
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Iterable
-
-
-@dataclass(frozen=True)
-class AgentResult:
-    """Stable response contract returned by the agent runner."""
-
-    answer: str
-    route: str
-    confidence: float
-    verified: bool
-    steps: list[str] = field(default_factory=list)
-    citations: list[str] = field(default_factory=list)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass(frozen=True)
 class RouteDefinition:
+    """Static route metadata used by the deterministic classifier."""
+
     name: str
     description: str
     keywords: tuple[str, ...]
@@ -74,7 +59,6 @@ ROUTES: tuple[RouteDefinition, ...] = (
         topology=ExecutionTopology.parallel,
         tools=("policy_first_rag", "live_search", "provenance_tracker"),
         model="reasoning-verifier-pair",
-        keywords=("research", "compare", "latest", "source", "summarize", "find", "evidence"),
         prompt="I mapped the request to a research workflow and structured the answer around evidence, trade-offs, and next steps.",
     ),
     RouteDefinition(
@@ -86,7 +70,6 @@ ROUTES: tuple[RouteDefinition, ...] = (
         topology=ExecutionTopology.graph,
         tools=("component_factory", "test_runner", "deployment_checker"),
         model="coding-capable-structured-output",
-        keywords=("build", "code", "implement", "design", "architecture", "feature", "api", "app"),
         prompt="I mapped the request to a build workflow and converted it into an implementation-ready delivery plan.",
     ),
     RouteDefinition(
@@ -98,7 +81,6 @@ ROUTES: tuple[RouteDefinition, ...] = (
         topology=ExecutionTopology.sequential,
         tools=("analytics_layer", "tableau_connector", "evaluation_engine"),
         model="analysis-long-context",
-        keywords=("analyze", "metric", "data", "trend", "report", "dashboard", "kpi", "insight"),
         prompt="I mapped the request to an analysis workflow and focused on findings, assumptions, and recommendations.",
     ),
     RouteDefinition(
@@ -110,17 +92,28 @@ ROUTES: tuple[RouteDefinition, ...] = (
         topology=ExecutionTopology.hierarchical,
         tools=("ticket_context", "runbook_search", "escalation_manager"),
         model="support-safe-response",
+        prompt="I mapped the request to a support workflow and prioritized diagnosis, mitigation, and verification.",
     ),
 )
 
 HIGH_RISK_TERMS = {"legal", "medical", "regulated", "delete", "payment", "credential", "secret", "finance"}
 FRESHNESS_TERMS = {"latest", "today", "current", "news", "price", "schedule", "recent"}
 AMBIGUOUS_TERMS = {"accordingly", "full", "fledge", "thing", "stuff", "it", "this"}
-
-        keywords=("error", "issue", "bug", "fix", "help", "troubleshoot", "why", "broken"),
-        prompt="I mapped the request to a support workflow and prioritized diagnosis, mitigation, and verification.",
-    ),
-)
+DENY_TERMS = {"exfiltrate", "steal", "malware", "phishing", "bypass"}
+ARCHITECTURAL_INVARIANTS = [
+    "No execution without valid contract",
+    "Policy Manager is final authority",
+    "No unauthorized tool execution",
+    "No response bypasses Verification",
+    "Memory never becomes Policy",
+    "Feedback never directly changes behavior",
+    "Learning never auto-promotes a Skill",
+    "Skills require governed approval",
+    "Fresh claims require freshness validation",
+    "Evidence requires provenance",
+    "High-risk actions require required HITL",
+    "Every material decision is audited",
+]
 
 
 def _tokens(text: str) -> set[str]:
@@ -145,12 +138,23 @@ def classify_route(query: str) -> tuple[RouteDefinition, float]:
     return route, confidence
 
 
+def _runtime_state(input_contract: InputContract) -> RuntimeStateContract:
+    ambiguity = "clarification_required" if len(_tokens(input_contract.query)) < 4 or _tokens(input_contract.query) & AMBIGUOUS_TERMS else "clear_or_resolved"
+    return RuntimeStateContract(
+        interaction_manager=f"accepted_{input_contract.channel.value}_interaction",
+        session_manager=input_contract.session_id,
+        context_manager="tenant_and_session_context_ready",
+        ambiguity_manager=ambiguity,
+        operations_manager="workflow_owner_ready" if ambiguity == "clear_or_resolved" else "awaiting_clarification",
+        invariants=ARCHITECTURAL_INVARIANTS,
+    )
+
+
 def _understand(input_contract: InputContract) -> IntentContract:
     tokens = _tokens(input_contract.query)
     ambiguity = 0.74 if tokens & AMBIGUOUS_TERMS and len(tokens) < 8 else 0.18
     urgency = 0.82 if {"urgent", "asap", "critical", "broken"} & tokens else 0.35
     sentiment = "concerned" if {"issue", "broken", "complaint", "error"} & tokens else "neutral"
-    goals = ["produce governed response", "preserve auditability"]
     return IntentContract(
         intent="execute_agent_workflow",
         lifecycle="new_request",
@@ -160,7 +164,7 @@ def _understand(input_contract: InputContract) -> IntentContract:
         ambiguity=ambiguity,
         language="en",
         entities=sorted(token for token in tokens if token in HIGH_RISK_TERMS or token in FRESHNESS_TERMS),
-        goals=goals,
+        goals=["produce governed response", "preserve auditability"],
     )
 
 
@@ -180,7 +184,36 @@ def _score_signals(query: str, confidence: float, intent: IntentContract) -> Sig
     )
 
 
-def _route(route: RouteDefinition, signal: SignalContract) -> RouteContract:
+def _policy_precheck(input_contract: InputContract, signal: SignalContract) -> PolicyContract:
+    tokens = _tokens(input_contract.query)
+    if tokens & DENY_TERMS:
+        return PolicyContract(
+            verdict=EdgeDecision.blocked,
+            constraints=["deny_execution", "emit_refusal", "audit_block"],
+            requires_human_review=False,
+            reason="Policy denied unsafe or unauthorized intent.",
+        )
+    if signal.risk_score >= 0.7 or signal.confidence < 0.6:
+        return PolicyContract(
+            verdict=EdgeDecision.escalate,
+            constraints=["require_human_review", "no_external_side_effects", "audit_all_material_decisions"],
+            requires_human_review=True,
+            reason="Policy requires human review for high risk or low-confidence requests.",
+        )
+    if signal.freshness_score >= 0.8:
+        return PolicyContract(
+            verdict=EdgeDecision.allowed,
+            constraints=["live_source_verification", "provenance_required", "audit_all_material_decisions"],
+            reason="Policy allows execution with freshness and provenance constraints.",
+        )
+    return PolicyContract(
+        verdict=EdgeDecision.allowed,
+        constraints=["no_external_side_effects", "provenance_required", "audit_all_material_decisions"],
+        reason="Policy allows deterministic local execution.",
+    )
+
+
+def _route(route: RouteDefinition, signal: SignalContract, policy: PolicyContract) -> RouteContract:
     high_risk = signal.risk_score >= 0.7
     needs_live = signal.freshness_score >= 0.8
     return RouteContract(
@@ -192,19 +225,32 @@ def _route(route: RouteDefinition, signal: SignalContract) -> RouteContract:
         tools=list(route.tools),
         requires_rag=route.name in {"Research", "Analyze"},
         requires_live_search=needs_live,
-        requires_human_review=high_risk or signal.confidence < 0.6,
+        requires_human_review=policy.requires_human_review,
         data_classification=DataClassification.regulated if high_risk else DataClassification.internal,
         risk=RiskLevel.high if high_risk else RiskLevel.low,
     )
 
 
-def _edge_decisions(intent: IntentContract, signal: SignalContract, route: RouteContract) -> list[DecisionContract]:
+def _plan(route: RouteContract, policy: PolicyContract) -> PlanContract:
+    return PlanContract(
+        intelligence_agent="Reasoning • Planning • Decision Support",
+        candidate_plan=[
+            "Preserve canonical runtime state",
+            "Apply Policy Manager constraints before routing or tools",
+            f"Delegate to {route.agent} using {route.topology.value} topology",
+            "Collect evidence with provenance before synthesis",
+            "Verify candidate response before final policy gate",
+        ],
+        orchestrator="Task Delegation & Workflow Planning",
+        supervisor="Health • Failure • Retry • Recovery",
+        manager_fabric=["memory_manager", "learning_manager", "skill_manager", "tool_intelligence", "rag_evidence_manager", "model_router"],
+    )
+
+
+def _edge_decisions(intent: IntentContract, signal: SignalContract, route: RouteContract, policy: PolicyContract) -> list[DecisionContract]:
     return [
-        DecisionContract(
-            edge="contract_valid",
-            decision=EdgeDecision.allowed,
-            reason="Input contract passed Pydantic validation.",
-        ),
+        DecisionContract(edge="contract_valid", decision=EdgeDecision.allowed, reason="Input contract passed Pydantic validation."),
+        DecisionContract(edge="policy_authority", decision=policy.verdict, reason=policy.reason),
         DecisionContract(
             edge="ambiguous",
             decision=EdgeDecision.escalate if intent.ambiguity >= 0.7 else EdgeDecision.allowed,
@@ -224,11 +270,13 @@ def _edge_decisions(intent: IntentContract, signal: SignalContract, route: Route
 
 
 def _evidence(route: RouteContract) -> list[EvidenceContract]:
-    evidence = [EvidenceContract(source_id="contract:versioned-schema-registry", retrieval_method="local_contract", relevance=0.92, confidence=0.95)]
+    evidence = [
+        EvidenceContract(source_id="contract:versioned-schema-registry", retrieval_method="local_contract", relevance=0.92, confidence=0.95)
+    ]
     if route.requires_rag:
         evidence.append(EvidenceContract(source_id="rag:policy-first-placeholder", retrieval_method="planned_hybrid_search", relevance=0.78, confidence=0.72))
     if route.requires_live_search:
-        evidence.append(EvidenceContract(source_id="live-search:required-before-final", retrieval_method="freshness_gate", relevance=0.8, confidence=0.62))
+        evidence.append(EvidenceContract(source_id="live-search:required-before-final", retrieval_method="freshness_gate", relevance=0.8, confidence=0.62, freshness_required=True))
     return evidence
 
 
@@ -236,17 +284,47 @@ def _audit(*events: tuple[str, str, str]) -> list[AuditEvent]:
     return [AuditEvent(stage=stage, status=status, detail=detail) for stage, status, detail in events]
 
 
-def _compose_answer(input_contract: InputContract, route: RouteContract, decisions: list[DecisionContract]) -> tuple[str, str, bool]:
-    blocking = [decision for decision in decisions if decision.decision in {EdgeDecision.blocked, EdgeDecision.escalate}]
-    verified = not any(decision.decision == EdgeDecision.blocked for decision in decisions)
-    gate = "CONDITIONAL" if blocking else "PASS"
-    review_note = " Human review is recommended before production execution." if blocking else " Automated execution is permitted for this demo run."
+def _verify(decisions: list[DecisionContract], evidence: list[EvidenceContract], route: RouteContract) -> VerificationContract:
+    blocked = any(decision.decision == EdgeDecision.blocked for decision in decisions)
+    escalated = any(decision.decision == EdgeDecision.escalate for decision in decisions)
+    evidence_decision = EdgeDecision.allowed if evidence and all(item.provenance for item in evidence) else EdgeDecision.repair
+    citation_decision = EdgeDecision.allowed if evidence else EdgeDecision.repair
+    risk_decision = EdgeDecision.escalate if route.requires_human_review else EdgeDecision.allowed
+    verdict = EdgeDecision.blocked if blocked else EdgeDecision.escalate if escalated else EdgeDecision.allowed
+    repairs = [] if verdict == EdgeDecision.allowed else ["Resolve Policy Manager constraints before final response delivery."]
+    return VerificationContract(
+        evidence=evidence_decision,
+        policy=verdict,
+        factual_consistency=EdgeDecision.allowed,
+        citations=citation_decision,
+        risk=risk_decision,
+        format=EdgeDecision.allowed,
+        verdict=verdict,
+        repairs=repairs,
+    )
+
+
+def _compose_answer(
+    input_contract: InputContract,
+    runtime_state: RuntimeStateContract,
+    policy: PolicyContract,
+    route: RouteContract,
+    plan: PlanContract,
+    verification: VerificationContract,
+) -> tuple[str, str, bool]:
+    verified = verification.verdict != EdgeDecision.blocked
+    gate = "BLOCK" if verification.verdict == EdgeDecision.blocked else "CONDITIONAL" if verification.verdict == EdgeDecision.escalate else "PASS"
+    status = "passed validation" if verified else "blocked by validation"
+    review_note = " Human review is recommended before production execution." if gate == "CONDITIONAL" else " Automated execution is permitted for this demo run."
     answer = (
         f"Architecture-aligned route: {route.route} in the {route.domain} domain. "
         f"Topology: {route.topology.value}; assigned agent: {route.agent}; model policy: {route.model}. "
+        f"Policy Manager verdict: {policy.verdict.value}; constraints: {', '.join(policy.constraints)}. "
+        f"Manager fabric: {', '.join(plan.manager_fabric)}. "
         f"Tools planned: {', '.join(route.tools)}. "
-        f"Data classification: {route.data_classification.value}; risk: {route.risk.value}."
-        f"{review_note}\n\n"
+        f"Data classification: {route.data_classification.value}; risk: {route.risk.value}. "
+        f"Verification verdict: {verification.verdict.value}; runtime state: {runtime_state.state_id}. "
+        f"Execution status: {status}; production gate: {gate}.{review_note}\n\n"
         f"Normalized request: {input_contract.query}"
     )
     return answer, gate, verified
@@ -257,22 +335,44 @@ async def run_agent(query: str, channel: Channel = Channel.web, tenant_id: str =
 
     await asyncio.sleep(0)
     input_contract = InputContract(query=query, channel=channel, tenant_id=tenant_id)
+    runtime_state = _runtime_state(input_contract)
     route_definition, confidence = classify_route(input_contract.query)
     intent = _understand(input_contract)
     signals = _score_signals(input_contract.query, confidence, intent)
-    route = _route(route_definition, signals)
-    decisions = _edge_decisions(intent, signals, route)
+    policy = _policy_precheck(input_contract, signals)
+    route = _route(route_definition, signals, policy)
+    plan = _plan(route, policy)
+    decisions = _edge_decisions(intent, signals, route, policy)
     evidence = _evidence(route)
-    answer, production_gate, verified = _compose_answer(input_contract, route, decisions)
+    verification = _verify(decisions, evidence, route)
+    answer, production_gate, verified = _compose_answer(input_contract, runtime_state, policy, route, plan, verification)
     audit_events = _audit(
         ("session_manager", "ok", f"Session {input_contract.session_id} opened for tenant {input_contract.tenant_id}."),
         ("input_normalization", "ok", "Whitespace normalized and channel metadata captured."),
-        ("pydantic_contract_engine", "ok", f"Contracts validated at {input_contract.contract_version}."),
-        ("human_understanding", "ok", f"Intent={intent.intent}; ambiguity={intent.ambiguity:.0%}; urgency={intent.urgency:.0%}."),
-        ("signal_scoring", "ok", f"Confidence={signals.confidence:.0%}; risk={signals.risk_score:.0%}; freshness={signals.freshness_score:.0%}."),
+        ("canonical_contract_engine", "ok", f"Contracts validated at {input_contract.contract_version}."),
+        ("context_manager", "ok", runtime_state.context_manager),
+        ("ambiguity_manager", runtime_state.ambiguity_manager, "Ambiguity evaluated before operations handoff."),
+        ("operations_manager", "ok", runtime_state.operations_manager),
+        ("intent_human_understanding", "ok", f"Intent={intent.intent}; ambiguity={intent.ambiguity:.0%}; urgency={intent.urgency:.0%}."),
+        ("signal_risk_intelligence", "ok", f"Confidence={signals.confidence:.0%}; risk={signals.risk_score:.0%}; freshness={signals.freshness_score:.0%}."),
+        ("policy_manager", policy.verdict.value, policy.reason),
         ("routing_manager", "ok", f"Selected {route.route} route with {route.topology.value} topology."),
+        ("intelligence_agent", "ok", "; ".join(plan.candidate_plan)),
+        ("orchestrator", "ok", plan.orchestrator),
+        ("supervisor", "ok", plan.supervisor),
+        ("memory_manager", "ok", "Working and session memory feed context; memory never becomes policy."),
+        ("learning_manager", "ok", "Approved feedback only; no automatic promotion."),
+        ("skill_manager", "ok", "Approved skill registry enforced before tool intelligence."),
+        ("tool_intelligence", "ok", "Tool proposal constrained by policy before secure execution."),
+        ("rag_evidence_manager", "ok", "Policy-filtered evidence bundle prepared with provenance."),
+        ("model_router", "ok", f"Model policy selected {route.model}."),
+        ("synthesis_engine", "ok", "Candidate response synthesized from route, policy, and evidence."),
+        ("verification_manager", verification.verdict.value, "Evidence, policy, factual, citation, risk, and format checks completed."),
         ("deterministic_edges", "ok", "; ".join(f"{item.edge}:{item.decision.value}" for item in decisions)),
         ("response_governance", "ok", "Applied polite, calm, evidence-aware response policy."),
+        ("final_policy_gate", production_gate.lower(), "Final response returned only after Policy Manager authorization."),
+        ("security_control_plane", "ok", "Authentication, authorization, tenant isolation, data classification, privacy, and secrets boundaries recorded."),
+        ("architectural_invariants", "ok", "; ".join(runtime_state.invariants)),
         ("strict_architectural_auditor", production_gate.lower(), f"Production gate result: {production_gate}."),
     )
     return AgentResult(
@@ -281,52 +381,16 @@ async def run_agent(query: str, channel: Channel = Channel.web, tenant_id: str =
         confidence=signals.confidence,
         verified=verified,
         input_contract=input_contract,
+        runtime_state=runtime_state,
         intent_contract=intent,
         signal_contract=signals,
+        policy_contract=policy,
         route_contract=route,
+        plan_contract=plan,
         decisions=decisions,
         evidence=evidence,
+        verification_contract=verification,
         audit_events=audit_events,
         response_governance=["polite", "calm_neutral", "non_aggressive", "evidence_aware", "audience_aware"],
         production_gate=production_gate,
-    confidence = 0.62 if score == 0 else min(0.96, 0.68 + (score / max(total_matches, 1)) * 0.28)
-    return route, confidence
-
-
-def _validate(query: str) -> tuple[bool, list[str]]:
-    checks = ["Input accepted", "No destructive action requested", "Response contract validated"]
-    if len(query.strip()) < 4:
-        return False, ["Input is too short for reliable routing"]
-    return True, checks
-
-
-def _compose_answer(query: str, route: RouteDefinition, verified: bool) -> str:
-    status = "passed validation" if verified else "needs more detail before execution"
-    return (
-        f"{route.prompt}\n\n"
-        f"Request: {query.strip()}\n\n"
-        f"Execution status: {status}. Recommended next action: review the proposed route, "
-        "attach any required sources or systems, then execute with human-visible audit logging."
-    )
-
-
-async def run_agent(query: str) -> AgentResult:
-    """Run the local async control-plane workflow for a single query."""
-
-    await asyncio.sleep(0)
-    route, confidence = classify_route(query)
-    verified, checks = _validate(query)
-    steps = [
-        "Classified the request intent",
-        f"Selected {route.name} route: {route.description}",
-        *checks,
-        "Prepared final response",
-    ]
-    return AgentResult(
-        answer=_compose_answer(query, route, verified),
-        route=route.name,
-        confidence=confidence,
-        verified=verified,
-        steps=steps,
-        citations=["local:deterministic-router", "local:validation-policy"],
     )

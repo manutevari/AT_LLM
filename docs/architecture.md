@@ -6,32 +6,133 @@ This implementation follows the supplied end-to-end flowchart as an executable, 
 
 ```mermaid
 flowchart TB
-  USER[User / Organization] --> INTERACTION[Interaction Layer]
+  USER[User / Organization] --> CHANNEL[Interaction Channels: Web / Chat / Mobile / Voice / API / Files]
+  CHANNEL --> INTERACTION[Interaction Manager]
   INTERACTION --> SESSION[Session Manager]
   SESSION --> INPUT[Input Normalization]
-  INPUT --> PYDANTIC[Pydantic Contract Engine]
-  PYDANTIC --> VALIDATION[Runtime Validation Engine]
-  VALIDATION --> HUMAN[Human Understanding]
-  HUMAN --> QUERY[Query Intelligence]
-  QUERY --> SIGNAL[Signal Scoring Engine]
-  SIGNAL --> ROUTING[Routing Manager]
-  ROUTING --> EDGES[Deterministic Predicate Engine]
-  EDGES --> TOPOLOGY[Dynamic Topology Manager]
-  TOPOLOGY --> ORCH[Orchestrator / Supervisor]
-  ORCH --> FABRIC[Execution Fabric: Ruflo / LangGraph / Custom]
-  ROUTING --> RAG[Policy-First RAG]
-  ROUTING --> TOOLS[Tool Intelligence]
-  ROUTING --> MODELS[Multi-Model Router]
-  RAG --> EVIDENCE[Evidence Provenance]
-  TOOLS --> GOVERNANCE[Governance + Secure Tool Execution]
-  MODELS --> SYNTHESIS[Synthesis]
-  EVIDENCE --> SYNTHESIS
-  GOVERNANCE --> SYNTHESIS
-  SYNTHESIS --> CRITIC[Critic / Verification]
-  CRITIC --> RESPONSE[Response Governance]
-  RESPONSE --> AUDITOR[Strict Architectural Auditor]
-  AUDITOR --> GATE{Production Gate}
-  GATE --> FINAL[Final Response]
+  INPUT --> CONTRACT[Canonical Contract Engine: Pydantic / Schema Validation]
+  CONTRACT --> CONTEXT[Context Manager]
+  CONTEXT --> AMBIGUITY[Ambiguity Manager]
+  AMBIGUITY -->|Clear / Resolved| OPS[Operations Manager: Workflow Owner]
+  AMBIGUITY -->|Clarification Required| CLARIFY[Clarification Response]
+  CLARIFY --> USER
+
+  OPS --> STATE[Canonical Runtime State]
+  STATE --> INTENT[Intent / Human Understanding]
+  INTENT --> SIGNAL[Signal & Risk Intelligence]
+  SIGNAL --> POLICY_PRE[Policy Pre-Check]
+
+  POLICY_PRE --> POLICY[Policy Manager: Final Authority]
+  POLICY -->|Deny| BLOCK[Block / Refuse]
+  POLICY -->|Require Human| HITL[Human Review]
+  POLICY -->|Allow With Constraints| ROUTING[Routing Manager]
+  POLICY -->|Allow| ROUTING
+
+  ROUTING --> INTELLIGENCE[Intelligence Agent: Reasoning / Planning / Decision Support]
+  INTELLIGENCE --> PLAN[Candidate Plan]
+  PLAN --> ORCHESTRATOR[Orchestrator: Task Delegation & Workflow Planning]
+  OPS -.-> SUPERVISOR[Supervisor: Health / Failure / Retry / Recovery]
+  ORCHESTRATOR -.-> SUPERVISOR
+  SUPERVISOR -->|Retry / Recover| ORCHESTRATOR
+  SUPERVISOR -->|Unrecoverable Failure| FAILURE[Failure / Escalation]
+
+  ORCHESTRATOR --> MEMORY[Memory Manager]
+  ORCHESTRATOR --> LEARNING[Learning Manager: Approved Feedback Only]
+  ORCHESTRATOR --> SKILLS[Skill Manager: Approved Skills & Tool Registry]
+  ORCHESTRATOR --> TOOL_INTEL[Tool Intelligence: Capability Selection]
+  ORCHESTRATOR --> RAG[RAG / Evidence Manager]
+  ORCHESTRATOR --> MODEL_ROUTER[Model Router]
+
+  MEMORY --> CONTEXT
+  MEMORY --> MEMORY_POLICY[Memory Policy Check]
+  MEMORY_POLICY --> POLICY
+  LEARNING --> LEARNING_GATE[Learning Promotion Gate]
+  LEARNING_GATE --> POLICY
+  SKILLS --> SKILL_EVAL[Skill Evaluation]
+  SKILL_EVAL --> POLICY
+
+  TOOL_INTEL --> TOOL_POLICY[Tool Authorization]
+  TOOL_POLICY --> POLICY
+  POLICY -->|Allowed| TOOL_VALIDATE[Tool Schema / Argument Validation]
+  TOOL_VALIDATE --> TOOL_EXEC[Secure Tool Executor]
+  TOOL_EXEC --> TOOL_RESULT[Tool Result]
+  TOOL_RESULT --> TOOL_VERIFY[Tool Result Validation]
+  TOOL_VERIFY -->|Valid| SYNTHESIS[Synthesis Engine]
+  TOOL_VERIFY -->|Invalid / Suspicious| REPAIR[Repair / Re-plan]
+  REPAIR --> ORCHESTRATOR
+
+  RAG --> CORPUS_POLICY[Policy-Filtered Corpus]
+  CORPUS_POLICY --> RETRIEVAL[Retrieval]
+  RETRIEVAL --> METADATA[Metadata Filtering]
+  METADATA --> RERANK[Reranking]
+  RERANK --> AUTHORITY[Source Authority Check]
+  AUTHORITY --> FRESHNESS[Freshness Manager]
+  FRESHNESS -->|Freshness Required| LIVE[Live Search]
+  FRESHNESS -->|Fresh Enough| EVIDENCE[Evidence Bundle]
+  LIVE --> LIVE_VERIFY[Live Source Verification]
+  LIVE_VERIFY --> EVIDENCE
+  EVIDENCE --> PROVENANCE[Provenance Manager]
+  PROVENANCE --> SYNTHESIS
+
+  MODEL_ROUTER --> MODEL_POLICY[Model Policy Check]
+  MODEL_POLICY --> POLICY
+  POLICY -->|Approved Model| MODEL_SELECT[Model Selection]
+  MODEL_SELECT --> MODEL[LLM / Reasoning Model]
+  MODEL --> MODEL_OUTPUT[Candidate Reasoning / Draft]
+  MODEL_OUTPUT --> SYNTHESIS
+
+  SYNTHESIS --> CANDIDATE_RESPONSE[Candidate Response]
+  CANDIDATE_RESPONSE --> VERIFICATION[Verification Manager]
+  VERIFICATION --> VERDICT{Verification Verdict}
+  VERDICT -->|Pass| RESPONSE_GOV[Response Governance]
+  VERDICT -->|Repair| REPAIR
+  VERDICT -->|Clarify| AMBIGUITY
+  VERDICT -->|Escalate| HITL
+  VERDICT -->|Block| BLOCK
+  RESPONSE_GOV --> FINAL_POLICY[Final Policy Gate]
+  FINAL_POLICY --> POLICY
+  POLICY -->|Approved| FINAL[Final Response]
+  FINAL_POLICY -->|Rejected| REPAIR
+  FINAL --> USER
+
+  AUDIT[Auditor: Immutable Audit / Trace] --> TRACE[Execution Trace / Audit Store]
+  INTERACTION -.-> AUDIT
+  SESSION -.-> AUDIT
+  CONTRACT -.-> AUDIT
+  CONTEXT -.-> AUDIT
+  AMBIGUITY -.-> AUDIT
+  OPS -.-> AUDIT
+  POLICY -.-> AUDIT
+  INTENT -.-> AUDIT
+  SIGNAL -.-> AUDIT
+  ROUTING -.-> AUDIT
+  INTELLIGENCE -.-> AUDIT
+  ORCHESTRATOR -.-> AUDIT
+  SUPERVISOR -.-> AUDIT
+  MEMORY -.-> AUDIT
+  LEARNING -.-> AUDIT
+  SKILLS -.-> AUDIT
+  TOOL_EXEC -.-> AUDIT
+  RAG -.-> AUDIT
+  MODEL -.-> AUDIT
+  VERIFICATION -.-> AUDIT
+  RESPONSE_GOV -.-> AUDIT
+  FINAL -.-> AUDIT
+
+  SECURITY[Security Control Plane] -.-> POLICY
+  SECURITY -.-> TOOL_EXEC
+  SECURITY -.-> MEMORY
+  SECURITY -.-> RAG
+  SECURITY -.-> AUDIT
+
+  INVARIANTS[Architectural Invariants] -.-> POLICY
+  INVARIANTS -.-> VERIFICATION
+  INVARIANTS -.-> ORCHESTRATOR
+  INVARIANTS -.-> TOOL_EXEC
+  INVARIANTS -.-> MEMORY
+  INVARIANTS -.-> LEARNING
+  INVARIANTS -.-> SKILLS
+  INVARIANTS -.-> AUDIT
 ```
 
 ## Contract coverage
@@ -39,11 +140,15 @@ flowchart TB
 | Flowchart concern | Implemented contract / field |
 | --- | --- |
 | Input contract, session, interaction channel | `InputContract` |
+| Interaction, session, context, ambiguity, operations, invariants | `RuntimeStateContract` |
 | Intent, sentiment, urgency, ambiguity, entities, goals | `IntentContract` |
 | Composite signal score | `SignalContract` |
+| Policy Manager final authority and constraints | `PolicyContract` |
 | Routing, domain, agent, model, tools, topology, risk | `RouteContract` |
+| Intelligence agent, candidate plan, orchestrator, supervisor, manager fabric | `PlanContract` |
 | Conditional edge policy | `DecisionContract` |
 | Evidence and provenance | `EvidenceContract` |
+| Evidence, policy, factual, citation, risk, and format verification | `VerificationContract` |
 | Observability and strict auditor | `AuditEvent` and `production_gate` |
 | Final response contract | `AgentResult` |
 
