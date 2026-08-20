@@ -4,11 +4,6 @@ This module maps the reference flowchart into executable local control-plane
 stages: session/input normalization, Pydantic validation, human understanding,
 query intelligence, signal scoring, routing, deterministic predicates,
 orchestration planning, evidence/provenance, response governance, and audit.
-"""Deterministic agent orchestration primitives used by the UI and API.
-
-The project can be wired to external LLM/tool providers later, but these
-components provide a reliable local control plane: classify intent, route work,
-apply guardrail-style validation, and produce an auditable response contract.
 """
 
 from __future__ import annotations
@@ -33,26 +28,12 @@ from .contracts import (
     RouteContract,
     SignalContract,
 )
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Iterable
-
-
-@dataclass(frozen=True)
-class AgentResult:
-    """Stable response contract returned by the agent runner."""
-
-    answer: str
-    route: str
-    confidence: float
-    verified: bool
-    steps: list[str] = field(default_factory=list)
-    citations: list[str] = field(default_factory=list)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass(frozen=True)
 class RouteDefinition:
+    """Static route metadata used by the deterministic classifier."""
+
     name: str
     description: str
     keywords: tuple[str, ...]
@@ -74,7 +55,6 @@ ROUTES: tuple[RouteDefinition, ...] = (
         topology=ExecutionTopology.parallel,
         tools=("policy_first_rag", "live_search", "provenance_tracker"),
         model="reasoning-verifier-pair",
-        keywords=("research", "compare", "latest", "source", "summarize", "find", "evidence"),
         prompt="I mapped the request to a research workflow and structured the answer around evidence, trade-offs, and next steps.",
     ),
     RouteDefinition(
@@ -86,7 +66,6 @@ ROUTES: tuple[RouteDefinition, ...] = (
         topology=ExecutionTopology.graph,
         tools=("component_factory", "test_runner", "deployment_checker"),
         model="coding-capable-structured-output",
-        keywords=("build", "code", "implement", "design", "architecture", "feature", "api", "app"),
         prompt="I mapped the request to a build workflow and converted it into an implementation-ready delivery plan.",
     ),
     RouteDefinition(
@@ -98,7 +77,6 @@ ROUTES: tuple[RouteDefinition, ...] = (
         topology=ExecutionTopology.sequential,
         tools=("analytics_layer", "tableau_connector", "evaluation_engine"),
         model="analysis-long-context",
-        keywords=("analyze", "metric", "data", "trend", "report", "dashboard", "kpi", "insight"),
         prompt="I mapped the request to an analysis workflow and focused on findings, assumptions, and recommendations.",
     ),
     RouteDefinition(
@@ -110,17 +88,13 @@ ROUTES: tuple[RouteDefinition, ...] = (
         topology=ExecutionTopology.hierarchical,
         tools=("ticket_context", "runbook_search", "escalation_manager"),
         model="support-safe-response",
+        prompt="I mapped the request to a support workflow and prioritized diagnosis, mitigation, and verification.",
     ),
 )
 
 HIGH_RISK_TERMS = {"legal", "medical", "regulated", "delete", "payment", "credential", "secret", "finance"}
 FRESHNESS_TERMS = {"latest", "today", "current", "news", "price", "schedule", "recent"}
 AMBIGUOUS_TERMS = {"accordingly", "full", "fledge", "thing", "stuff", "it", "this"}
-
-        keywords=("error", "issue", "bug", "fix", "help", "troubleshoot", "why", "broken"),
-        prompt="I mapped the request to a support workflow and prioritized diagnosis, mitigation, and verification.",
-    ),
-)
 
 
 def _tokens(text: str) -> set[str]:
@@ -150,7 +124,6 @@ def _understand(input_contract: InputContract) -> IntentContract:
     ambiguity = 0.74 if tokens & AMBIGUOUS_TERMS and len(tokens) < 8 else 0.18
     urgency = 0.82 if {"urgent", "asap", "critical", "broken"} & tokens else 0.35
     sentiment = "concerned" if {"issue", "broken", "complaint", "error"} & tokens else "neutral"
-    goals = ["produce governed response", "preserve auditability"]
     return IntentContract(
         intent="execute_agent_workflow",
         lifecycle="new_request",
@@ -160,7 +133,7 @@ def _understand(input_contract: InputContract) -> IntentContract:
         ambiguity=ambiguity,
         language="en",
         entities=sorted(token for token in tokens if token in HIGH_RISK_TERMS or token in FRESHNESS_TERMS),
-        goals=goals,
+        goals=["produce governed response", "preserve auditability"],
     )
 
 
@@ -200,11 +173,7 @@ def _route(route: RouteDefinition, signal: SignalContract) -> RouteContract:
 
 def _edge_decisions(intent: IntentContract, signal: SignalContract, route: RouteContract) -> list[DecisionContract]:
     return [
-        DecisionContract(
-            edge="contract_valid",
-            decision=EdgeDecision.allowed,
-            reason="Input contract passed Pydantic validation.",
-        ),
+        DecisionContract(edge="contract_valid", decision=EdgeDecision.allowed, reason="Input contract passed Pydantic validation."),
         DecisionContract(
             edge="ambiguous",
             decision=EdgeDecision.escalate if intent.ambiguity >= 0.7 else EdgeDecision.allowed,
@@ -224,7 +193,9 @@ def _edge_decisions(intent: IntentContract, signal: SignalContract, route: Route
 
 
 def _evidence(route: RouteContract) -> list[EvidenceContract]:
-    evidence = [EvidenceContract(source_id="contract:versioned-schema-registry", retrieval_method="local_contract", relevance=0.92, confidence=0.95)]
+    evidence = [
+        EvidenceContract(source_id="contract:versioned-schema-registry", retrieval_method="local_contract", relevance=0.92, confidence=0.95)
+    ]
     if route.requires_rag:
         evidence.append(EvidenceContract(source_id="rag:policy-first-placeholder", retrieval_method="planned_hybrid_search", relevance=0.78, confidence=0.72))
     if route.requires_live_search:
@@ -240,13 +211,14 @@ def _compose_answer(input_contract: InputContract, route: RouteContract, decisio
     blocking = [decision for decision in decisions if decision.decision in {EdgeDecision.blocked, EdgeDecision.escalate}]
     verified = not any(decision.decision == EdgeDecision.blocked for decision in decisions)
     gate = "CONDITIONAL" if blocking else "PASS"
+    status = "passed validation" if verified else "blocked by validation"
     review_note = " Human review is recommended before production execution." if blocking else " Automated execution is permitted for this demo run."
     answer = (
         f"Architecture-aligned route: {route.route} in the {route.domain} domain. "
         f"Topology: {route.topology.value}; assigned agent: {route.agent}; model policy: {route.model}. "
         f"Tools planned: {', '.join(route.tools)}. "
-        f"Data classification: {route.data_classification.value}; risk: {route.risk.value}."
-        f"{review_note}\n\n"
+        f"Data classification: {route.data_classification.value}; risk: {route.risk.value}. "
+        f"Execution status: {status}; production gate: {gate}.{review_note}\n\n"
         f"Normalized request: {input_contract.query}"
     )
     return answer, gate, verified
@@ -289,44 +261,4 @@ async def run_agent(query: str, channel: Channel = Channel.web, tenant_id: str =
         audit_events=audit_events,
         response_governance=["polite", "calm_neutral", "non_aggressive", "evidence_aware", "audience_aware"],
         production_gate=production_gate,
-    confidence = 0.62 if score == 0 else min(0.96, 0.68 + (score / max(total_matches, 1)) * 0.28)
-    return route, confidence
-
-
-def _validate(query: str) -> tuple[bool, list[str]]:
-    checks = ["Input accepted", "No destructive action requested", "Response contract validated"]
-    if len(query.strip()) < 4:
-        return False, ["Input is too short for reliable routing"]
-    return True, checks
-
-
-def _compose_answer(query: str, route: RouteDefinition, verified: bool) -> str:
-    status = "passed validation" if verified else "needs more detail before execution"
-    return (
-        f"{route.prompt}\n\n"
-        f"Request: {query.strip()}\n\n"
-        f"Execution status: {status}. Recommended next action: review the proposed route, "
-        "attach any required sources or systems, then execute with human-visible audit logging."
-    )
-
-
-async def run_agent(query: str) -> AgentResult:
-    """Run the local async control-plane workflow for a single query."""
-
-    await asyncio.sleep(0)
-    route, confidence = classify_route(query)
-    verified, checks = _validate(query)
-    steps = [
-        "Classified the request intent",
-        f"Selected {route.name} route: {route.description}",
-        *checks,
-        "Prepared final response",
-    ]
-    return AgentResult(
-        answer=_compose_answer(query, route, verified),
-        route=route.name,
-        confidence=confidence,
-        verified=verified,
-        steps=steps,
-        citations=["local:deterministic-router", "local:validation-policy"],
     )
