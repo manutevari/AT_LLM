@@ -1,18 +1,44 @@
-# AI Agent Platform — Essential Coding Base
+# AI Agent Platform — Architecture-Aligned Control Plane
 
-Includes FastAPI + Streamlit, Pydantic contracts, deterministic routing,
-conditional edges, PostgreSQL + pgvector schema/repository, OpenRouter model
-adapter, tool registry, audit events, Tableau-ready SQL views, and optional
-Ruflo/LangGraph execution adapter boundaries.
+A full-fledged FastAPI + Streamlit starter for deterministic AI-agent orchestration. The app now maps the supplied enterprise flowchart into runnable local stages: session/input normalization, Pydantic contracts, human understanding, query intelligence, signal scoring, routing, deterministic edge decisions, topology planning, evidence provenance, response governance, and strict audit gating.
 
-Setup:
-1. Copy `.env.example` to `.env`.
-2. Set `DATABASE_URL`.
-3. Optionally set `OPENROUTER_API_KEY`.
-4. Run `psql "$DATABASE_URL" -f db/schema.sql`.
-5. `pip install -r requirements.txt`
-6. `uvicorn app.api:app --reload`
-7. `streamlit run streamlit_app.py`
-8. `pytest`
+## What is included
 
-This is an essential implementation base, not production certification.
+- **Streamlit operator console** for launching agent runs and inspecting response, contracts, routing, evidence, and audit tabs.
+- **Pydantic contract fabric** for input, intent, signal, route, edge decision, evidence, audit, and final response models.
+- **Deterministic orchestration runtime** spanning Research, Build, Analyze, and Support workflows with domain, topology, agent, model, tool, RAG, freshness, risk, and human-review decisions.
+- **FastAPI endpoint** for `/health` and `/agent` requests, compatible with the existing Vercel configuration.
+- **Reference architecture documentation** in `docs/architecture.md` with the implemented Mermaid flow and extension points.
+- **Pytest coverage** for route classification, auditable result behavior, ambiguity escalation, and high-risk governance.
+
+## Setup
+
+1. Copy `.env.example` to `.env` if you plan to add external providers later.
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run the API:
+   ```bash
+   uvicorn api.index:app --reload
+   ```
+4. Run the Streamlit console:
+   ```bash
+   streamlit run streamlit_app.py
+   ```
+5. Run tests:
+   ```bash
+   pytest
+   ```
+
+## API usage
+
+```bash
+curl -X POST http://127.0.0.1:8000/agent \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"Design a policy-first RAG workflow","channel":"api","tenant_id":"demo"}'
+```
+
+## Production notes
+
+This repository is a runnable control-plane foundation. Production deployments should add persistent PostgreSQL + pgvector storage, object storage, authenticated tenants, provider-specific model/tool adapters, rate limiting, LangGraph/Ruflo execution adapters, Tableau governed views, and environment-specific observability.
