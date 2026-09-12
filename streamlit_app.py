@@ -6,9 +6,6 @@ from app.agent import ROUTES, run_agent
 from app.contracts import Channel
 
 
-# ---------------------------------------------------------
-# Page Configuration
-# ---------------------------------------------------------
 st.set_page_config(
     page_title="AI Agent Platform",
     page_icon="🤖",
@@ -16,9 +13,6 @@ st.set_page_config(
 )
 
 
-# ---------------------------------------------------------
-# Custom Styling
-# ---------------------------------------------------------
 st.markdown(
     """
     <style>
@@ -62,19 +56,14 @@ st.markdown(
 )
 
 
-# ---------------------------------------------------------
-# Hero Section
-# ---------------------------------------------------------
 st.markdown(
     """
     <section class="hero">
       <h1>AI Agent Platform</h1>
-
       <p>
         Contract-first orchestration for routing, validation, tools,
         models, RAG, governance, observability, and audit.
       </p>
-
       <p>
         Route, validate, execute, and audit agent work
         from a polished control-plane console.
@@ -85,9 +74,6 @@ st.markdown(
 )
 
 
-# ---------------------------------------------------------
-# Session State
-# ---------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -95,9 +81,6 @@ if "latest_result" not in st.session_state:
     st.session_state.latest_result = None
 
 
-# ---------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------
 with st.sidebar:
     st.subheader("Session Settings")
 
@@ -119,7 +102,7 @@ with st.sidebar:
     for route in ROUTES:
         st.markdown(
             f"""
-            <span class='pill'>{route.name}</span>
+            <span class="pill">{route.name}</span>
             <strong>{route.domain}</strong>
             — {route.description}
             """,
@@ -127,9 +110,6 @@ with st.sidebar:
         )
 
 
-# ---------------------------------------------------------
-# Main Layout
-# ---------------------------------------------------------
 st.divider()
 
 left, right = st.columns(
@@ -138,25 +118,15 @@ left, right = st.columns(
 )
 
 
-# =========================================================
-# LEFT COLUMN — AGENT CHAT
-# =========================================================
 with left:
     st.subheader("Agent Chat")
 
-    # -----------------------------------------------------
-    # Display Previous Messages
-    # -----------------------------------------------------
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # -----------------------------------------------------
-    # Chat Input
-    # -----------------------------------------------------
     if prompt := st.chat_input("Describe the mission..."):
 
-        # Add user message
         st.session_state.messages.append(
             {
                 "role": "user",
@@ -167,9 +137,6 @@ with left:
         with st.chat_message("user"):
             st.write(prompt)
 
-        # -------------------------------------------------
-        # Run Agent
-        # -------------------------------------------------
         with st.chat_message("assistant"):
             with st.spinner(
                 "Session → contracts → signals → routing → governance → audit..."
@@ -189,15 +156,13 @@ with left:
                     st.write(result.answer)
 
                 except Exception as exc:
-                    st.error(
-                        f"Agent execution failed: {type(exc).__name__}: {exc}"
-                    )
-
                     st.session_state.latest_result = None
 
-        # -------------------------------------------------
-        # Save Assistant Response
-        # -------------------------------------------------
+                    st.error(
+                        f"Agent execution failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
         if st.session_state.latest_result is not None:
             st.session_state.messages.append(
                 {
@@ -209,20 +174,13 @@ with left:
         st.rerun()
 
 
-# =========================================================
-# RIGHT COLUMN — CONTROL PLANE
-# =========================================================
 with right:
     st.subheader("Control Plane Observability")
 
-    # -----------------------------------------------------
-    # Only render result details when a result exists
-    # -----------------------------------------------------
-    if result := st.session_state.latest_result:
+    result = st.session_state.latest_result
 
-        # -------------------------------------------------
-        # Metrics
-        # -------------------------------------------------
+    if result is not None:
+
         a, b, c, d, e = st.columns(5)
 
         a.metric(
@@ -250,9 +208,6 @@ with right:
             len(result.audit_events),
         )
 
-        # -------------------------------------------------
-        # Tabs
-        # -------------------------------------------------
         tabs = st.tabs(
             [
                 "Response",
@@ -263,20 +218,15 @@ with right:
             ]
         )
 
-        # =================================================
-        # RESPONSE TAB
-        # =================================================
         with tabs[0]:
             st.write(result.answer)
 
-            st.caption(
-                "Governance: "
-                + ", ".join(result.response_governance)
-            )
+            if result.response_governance:
+                st.caption(
+                    "Governance: "
+                    + ", ".join(result.response_governance)
+                )
 
-        # =================================================
-        # CONTRACTS TAB
-        # =================================================
         with tabs[1]:
             st.json(
                 {
@@ -289,12 +239,18 @@ with right:
                     "signals": result.signal_contract.model_dump(
                         mode="json"
                     ),
+                    "policy": result.policy_contract.model_dump(
+                        mode="json"
+                    ),
+                    "plan": result.plan_contract.model_dump(
+                        mode="json"
+                    ),
+                    "verification": result.verification_contract.model_dump(
+                        mode="json"
+                    ),
                 }
             )
 
-        # =================================================
-        # ROUTING TAB
-        # =================================================
         with tabs[2]:
             st.json(
                 result.route_contract.model_dump(
@@ -304,46 +260,50 @@ with right:
 
             st.write("Deterministic Edge Decisions")
 
-            st.dataframe(
-                [
-                    decision.model_dump(mode="json")
-                    for decision in result.decisions
-                ],
-                use_container_width=True,
-            )
+            decisions = [
+                decision.model_dump(mode="json")
+                for decision in result.decisions
+            ]
 
-        # =================================================
-        # EVIDENCE TAB
-        # =================================================
-        with tabs[3]:
-            st.dataframe(
-                [
-                    item.model_dump(mode="json")
-                    for item in result.evidence
-                ],
-                use_container_width=True,
-            )
-
-        # =================================================
-        # AUDIT TAB
-        # =================================================
-        with tabs[4]:
-            for event in result.audit_events:
-                st.markdown(
-                    f"""
-                    <div class='step'>
-                        <strong>{event.stage}</strong>
-                        · {event.status}
-                        <br/>
-                        {event.detail}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+            if decisions:
+                st.dataframe(
+                    decisions,
+                    use_container_width=True,
                 )
+            else:
+                st.info("No routing decisions recorded.")
 
-    # -----------------------------------------------------
-    # No Result Yet
-    # -----------------------------------------------------
+        with tabs[3]:
+            evidence = [
+                item.model_dump(mode="json")
+                for item in result.evidence
+            ]
+
+            if evidence:
+                st.dataframe(
+                    evidence,
+                    use_container_width=True,
+                )
+            else:
+                st.info("No evidence recorded.")
+
+        with tabs[4]:
+            if result.audit_events:
+                for event in result.audit_events:
+                    st.markdown(
+                        f"""
+                        <div class="step">
+                            <strong>{event.stage}</strong>
+                            · {event.status}
+                            <br/>
+                            {event.detail}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("No audit events recorded.")
+
     else:
         st.info(
             "Enter a mission to preview the full contract, "
