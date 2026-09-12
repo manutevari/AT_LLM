@@ -1,65 +1,53 @@
 # =========================================================
-# streamlit_app.py
-# ADD INSIDE THE SIDEBAR
+# app/api_keys.py
 # =========================================================
 
-from app.api_keys import generate_api_key, fingerprint_api_key
+from __future__ import annotations
+
+import hashlib
+import secrets
 
 
-# ---------------------------------------------------------
-# API Key Generator
-# ---------------------------------------------------------
+API_KEY_PREFIX = "ak_live_"
 
-st.divider()
 
-st.subheader("API Key Generator")
+def generate_api_key() -> str:
+    """
+    Generate a cryptographically secure API key.
 
-if st.button(
-    "🔐 Generate API Key",
-    use_container_width=True,
-):
+    The plaintext key must only be shown to the caller once.
+    Do not write the plaintext key to logs or audit events.
+    """
+    return f"{API_KEY_PREFIX}{secrets.token_urlsafe(32)}"
 
-    generated_key = generate_api_key()
-    key_fingerprint = fingerprint_api_key(
-        generated_key
+
+def fingerprint_api_key(api_key: str) -> str:
+    """
+    Return a non-reversible fingerprint suitable for audit/storage.
+    """
+    return hashlib.sha256(
+        api_key.encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def is_api_key_request(query: str) -> bool:
+    """
+    Detect an explicit API-key generation request.
+    """
+    normalized = " ".join(query.lower().split())
+
+    patterns = (
+        "generate api key",
+        "create api key",
+        "make api key",
+        "new api key",
+        "generate an api key",
+        "create an api key",
+        "make an api key",
+        "new api key",
     )
 
-    st.session_state.generated_api_key = generated_key
-    st.session_state.generated_api_key_fingerprint = (
-        key_fingerprint
+    return any(
+        pattern in normalized
+        for pattern in patterns
     )
-
-if (
-    "generated_api_key"
-    in st.session_state
-):
-
-    st.success(
-        "API key generated. Store it securely; "
-        "it will not be written to the audit trail."
-    )
-
-    st.code(
-        st.session_state.generated_api_key,
-        language="text",
-    )
-
-    st.caption(
-        "Fingerprint: "
-        + st.session_state.generated_api_key_fingerprint
-    )
-
-    if st.button(
-        "Clear Secret",
-        use_container_width=True,
-    ):
-
-        del st.session_state.generated_api_key
-
-        if (
-            "generated_api_key_fingerprint"
-            in st.session_state
-        ):
-            del st.session_state.generated_api_key_fingerprint
-
-        st.rerun()
