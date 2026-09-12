@@ -1,3 +1,5 @@
+# app/__init__.py
+
 """Core package for the AI Agent Platform."""
 
 from .contracts import (
