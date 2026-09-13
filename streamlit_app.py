@@ -67,6 +67,32 @@ with st.sidebar:
             fingerprint_api_key(key)
         )
 
+
+with st.sidebar:
+    st.header("⚙️ Agent Configuration")
+
+    channel = st.selectbox(
+        "Channel",
+        options=[c.value for c in Channel],
+        index=0,
+    )
+
+    st.divider()
+
+    st.subheader("🔐 API Key Generator")
+
+    if st.button(
+        "Generate API Key",
+        use_container_width=True,
+        type="primary",
+    ):
+        key = generate_api_key()
+
+        st.session_state.generated_api_key = key
+        st.session_state.generated_api_key_fingerprint = (
+            fingerprint_api_key(key)
+        )
+
     if st.session_state.generated_api_key:
         st.success("API key generated.")
 
@@ -139,6 +165,9 @@ if st.button(
                 prompt=query,
                 channel=Channel(channel),
             )
+        result = run_agent(
+            query=query,
+            channel=channel,
         )
 
         st.divider()
@@ -163,12 +192,14 @@ if st.button(
             st.metric(
                 "Route",
                 result.route,
+                result.route.name,
             )
 
         with col2:
             st.metric(
                 "Domain",
                 result.route_contract.domain,
+                result.route.domain,
             )
 
         with col3:
@@ -190,6 +221,12 @@ if st.button(
                 else decision
                 for decision in result.decisions
             ]
+        decision = result.decision
+
+        st.json(
+            decision.model_dump(mode="json")
+            if hasattr(decision, "model_dump")
+            else decision
         )
 
         # -------------------------------------------------
