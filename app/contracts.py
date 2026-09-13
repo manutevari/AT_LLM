@@ -48,6 +48,16 @@ class EdgeDecision(str, Enum):
     repair = "repair"
 
 
+class FallbackTier(str, Enum):
+    """Governed model execution tiers, ordered from preferred to safest fallback."""
+
+    l0_primary = "L0"
+    l1_secondary = "L1"
+    l2_local = "L2"
+    l3_deterministic = "L3"
+    l4_human = "L4"
+
+
 class ExecutionTopology(str, Enum):
     sequential = "sequential"
     parallel = "parallel"
@@ -161,6 +171,29 @@ class VerificationContract(BaseModel):
     repairs: list[str] = Field(default_factory=list)
 
 
+class ModelAttemptContract(BaseModel):
+    tier: FallbackTier
+    provider: str
+    model: str
+    status: str
+    reason: str
+
+
+class ModelFallbackContract(BaseModel):
+    selected_tier: FallbackTier
+    attempts: list[ModelAttemptContract]
+    human_escalation_required: bool = False
+
+
+class LearningLifecycleContract(BaseModel):
+    experience_recorded: bool
+    candidate_generated: bool = False
+    evaluation_status: str
+    promotion_status: str
+    registry_version: str | None = None
+    policy_can_be_modified: bool = False
+
+
 class AuditEvent(BaseModel):
     stage: str
     status: str
@@ -183,6 +216,8 @@ class AgentResult(BaseModel):
     decisions: list[DecisionContract]
     evidence: list[EvidenceContract]
     verification_contract: VerificationContract
+    model_fallback: ModelFallbackContract
+    learning_lifecycle: LearningLifecycleContract
     audit_events: list[AuditEvent]
     response_governance: list[str]
     production_gate: str

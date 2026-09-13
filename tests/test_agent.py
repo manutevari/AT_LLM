@@ -79,3 +79,25 @@ def test_policy_blocks_denied_requests_before_final_response():
     assert result.verification_contract.verdict == EdgeDecision.blocked
     assert result.production_gate == "BLOCK"
     assert result.verified is False
+
+
+def test_model_fallback_and_learning_are_governed():
+    result = asyncio.run(run_agent("Analyze dashboard metrics for retention"))
+
+    assert result.model_fallback.selected_tier.value == "L3"
+    assert [attempt.tier.value for attempt in result.model_fallback.attempts] == [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+    ]
+    assert result.learning_lifecycle.experience_recorded is True
+    assert result.learning_lifecycle.promotion_status == "candidate_only"
+    assert result.learning_lifecycle.policy_can_be_modified is False
+
+
+def test_human_review_uses_l4_fallback_tier():
+    result = asyncio.run(run_agent("design accordingly full fledge"))
+
+    assert result.model_fallback.selected_tier.value == "L4"
+    assert result.model_fallback.human_escalation_required is True

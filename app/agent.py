@@ -24,6 +24,10 @@ from .contracts import (
     EdgeDecision,
     EvidenceContract,
     ExecutionTopology,
+    FallbackTier,
+    LearningLifecycleContract,
+    ModelAttemptContract,
+    ModelFallbackContract,
     InputContract,
     IntentContract,
     PlanContract,
@@ -791,6 +795,82 @@ def _build_runtime_state() -> RuntimeStateContract:
 
 
 # =========================================================
+# MODEL FALLBACK / LEARN & GROW
+# =========================================================
+
+def _build_model_fallback(
+    policy: PolicyContract,
+) -> ModelFallbackContract:
+    """Describe the provider-neutral L0-L4 execution plan.
+
+    This deterministic starter intentionally does not make unconfigured
+    network model calls. L3 is therefore the active safe execution tier;
+    L0-L2 remain explicit, auditable integration points rather than claims
+    that an external provider was invoked.
+    """
+
+    if policy.verdict == EdgeDecision.escalate:
+        return ModelFallbackContract(
+            selected_tier=FallbackTier.l4_human,
+            human_escalation_required=True,
+            attempts=[
+                ModelAttemptContract(
+                    tier=FallbackTier.l4_human,
+                    provider="human-in-the-loop",
+                    model="human-review",
+                    status="required",
+                    reason="Policy requires clarification or human review.",
+                )
+            ],
+        )
+
+    return ModelFallbackContract(
+        selected_tier=FallbackTier.l3_deterministic,
+        attempts=[
+            ModelAttemptContract(
+                tier=FallbackTier.l0_primary,
+                provider="openrouter",
+                model="openrouter/auto",
+                status="not_configured",
+                reason="No configured OpenRouter credential or adapter.",
+            ),
+            ModelAttemptContract(
+                tier=FallbackTier.l1_secondary,
+                provider="secondary-provider",
+                model="configured-provider",
+                status="not_configured",
+                reason="No secondary provider adapter is configured.",
+            ),
+            ModelAttemptContract(
+                tier=FallbackTier.l2_local,
+                provider="local-inference",
+                model="ollama-or-vllm",
+                status="not_configured",
+                reason="No local inference adapter is configured.",
+            ),
+            ModelAttemptContract(
+                tier=FallbackTier.l3_deterministic,
+                provider="at_llm",
+                model="deterministic-contract-engine",
+                status="selected",
+                reason="Safe local deterministic control-plane execution.",
+            ),
+        ],
+    )
+
+
+def _build_learning_lifecycle() -> LearningLifecycleContract:
+    """Record experience without permitting autonomous policy mutation."""
+
+    return LearningLifecycleContract(
+        experience_recorded=True,
+        evaluation_status="pending_governed_evaluation",
+        promotion_status="candidate_only",
+        policy_can_be_modified=False,
+    )
+
+
+# =========================================================
 # API KEY TOOL
 # =========================================================
 
@@ -824,6 +904,7 @@ def _build_audit(
     verified: bool,
     production_gate: str,
     api_key_fingerprint: str | None = None,
+    model_fallback: ModelFallbackContract | None = None,
 ) -> List[AuditEvent]:
 
     stages = [
@@ -941,6 +1022,15 @@ def _build_audit(
             "model_router",
             "ok",
             f"Model policy selected: {route.model}.",
+        ),
+        (
+            "model_fallback",
+            "ok",
+            (
+                f"Selected fallback tier: {model_fallback.selected_tier.value}."
+                if model_fallback
+                else "Fallback plan unavailable."
+            ),
         ),
         (
             "synthesis_engine",
@@ -1119,6 +1209,9 @@ async def run_agent(
     runtime_state = _build_runtime_state()
 
     plan = _build_plan(route)
+
+    model_fallback = _build_model_fallback(policy)
+    learning_lifecycle = _build_learning_lifecycle()
 
     # -----------------------------------------------------
     # Decisions
@@ -1380,6 +1473,7 @@ async def run_agent(
         verified=verified,
         production_gate=production_gate,
         api_key_fingerprint=api_key_fingerprint,
+        model_fallback=model_fallback,
     )
 
     # -----------------------------------------------------
@@ -1401,6 +1495,8 @@ async def run_agent(
         decisions=decisions,
         evidence=evidence,
         verification_contract=verification,
+        model_fallback=model_fallback,
+        learning_lifecycle=learning_lifecycle,
         audit_events=audit_events,
         response_governance=[
             "policy_checked",

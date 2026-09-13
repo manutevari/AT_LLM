@@ -1,5 +1,9 @@
 # AI Agent Platform Reference Architecture
 
+> The AGI-oriented target state, the comparison to this control-plane
+> foundation, non-negotiable governance boundaries, and phased delivery plan
+> are defined in [the AT_LLM AGI-Oriented Master Blueprint](agi_master_blueprint.md).
+
 This implementation follows the supplied end-to-end flowchart as an executable, deterministic control-plane skeleton. The current code does not pretend to implement every external integration; instead, it exposes contract objects and auditable stage outputs for each major architectural concern so storage, model, RAG, tool, Tableau, and LangGraph/Ruflo adapters can be plugged in safely.
 
 ## Runtime flow
@@ -151,6 +155,35 @@ flowchart TB
 | Evidence, policy, factual, citation, risk, and format verification | `VerificationContract` |
 | Observability and strict auditor | `AuditEvent` and `production_gate` |
 | Final response contract | `AgentResult` |
+
+## Governed model fallback and Learn & Grow
+
+The model gateway is provider-neutral and evaluates fallback tiers in a
+fixed, auditable order. This starter does not invoke an external provider
+without a configured adapter and credential. Instead, it records the
+unavailable tier and selects the deterministic contract engine (L3), which
+keeps local execution safe and reproducible.
+
+| Tier | Intended integration | Starter behavior |
+| --- | --- | --- |
+| L0 | OpenRouter (`openrouter/auto`, free, code, or fusion routes) | Recorded as unconfigured until an authorized adapter is installed. |
+| L1 | Secondary configured providers | Recorded as unconfigured until an authorized adapter is installed. |
+| L2 | Local inference via Ollama or vLLM | Recorded as unconfigured until a local adapter is installed. |
+| L3 | Deterministic AT_LLM contract, policy, and routing engine | Active safe fallback for ordinary allowed requests. |
+| L4 | Human-in-the-loop review | Selected for policy escalation, high-risk work, or material ambiguity. |
+
+Each run returns a `ModelFallbackContract` containing every evaluated tier,
+the selected tier, provider/model identifiers, and selection rationale. This
+provides model/fallback observability without falsely claiming an external
+model was executed.
+
+The separate `LearningLifecycleContract` records that a governed experience
+was collected. It always starts as `candidate_only`, with evaluation pending,
+and explicitly declares that learning cannot modify policy. A future
+promotion must pass historical, regression, and safety evaluation before a
+versioned model, route, or skill registry can consume it. Memory remains
+context, learning remains candidate discovery, skills remain promoted
+capabilities, and policy remains the final authority.
 
 ## Extension points
 
