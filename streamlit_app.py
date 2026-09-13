@@ -160,14 +160,12 @@ if st.button(
         st.stop()
 
     try:
+        # Run the async agent entrypoint
         result = asyncio.run(
             run_agent(
                 prompt=query,
                 channel=Channel(channel),
             )
-        result = run_agent(
-            query=query,
-            channel=channel,
         )
 
         st.divider()
@@ -216,11 +214,13 @@ if st.button(
 
         st.json(
             [
-                decision.model_dump(mode="json")
-                if hasattr(decision, "model_dump")
-                else decision
-                for decision in result.decisions
+                d.model_dump(mode="json")
+                if hasattr(d, "model_dump")
+                else d
+                for d in result.decisions
             ]
+        )
+
         decision = result.decision
 
         st.json(
