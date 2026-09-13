@@ -48,6 +48,16 @@ class EdgeDecision(str, Enum):
     repair = "repair"
 
 
+class FallbackTier(str, Enum):
+    """Governed model execution tiers, ordered from preferred to safest fallback."""
+
+    l0_primary = "L0"
+    l1_secondary = "L1"
+    l2_local = "L2"
+    l3_deterministic = "L3"
+    l4_human = "L4"
+
+
 class ExecutionTopology(str, Enum):
     sequential = "sequential"
     parallel = "parallel"
@@ -161,6 +171,73 @@ class VerificationContract(BaseModel):
     repairs: list[str] = Field(default_factory=list)
 
 
+class ModelAttemptContract(BaseModel):
+    tier: FallbackTier
+    provider: str
+    model: str
+    status: str
+    reason: str
+
+
+class ModelFallbackContract(BaseModel):
+    selected_tier: FallbackTier
+    attempts: list[ModelAttemptContract]
+    human_escalation_required: bool = False
+
+
+class LearningLifecycleContract(BaseModel):
+    experience_recorded: bool
+    candidate_generated: bool = False
+    evaluation_status: str
+    promotion_status: str
+    registry_version: str | None = None
+    policy_can_be_modified: bool = False
+
+
+class ResponseDraftContract(BaseModel):
+    """Candidate response that must not be released directly to a user."""
+
+    content: str
+    generator: str
+    contains_secret: bool = False
+
+
+class ResponseReleaseContract(BaseModel):
+    """Outcome of verification and the final policy gate."""
+
+    verification_verdict: EdgeDecision
+    final_policy_verdict: EdgeDecision
+    released: bool
+    production_gate: str
+
+
+class CanonicalExecutionStateContract(BaseModel):
+    """Authoritative, sealed summary of the governed execution lifecycle."""
+
+    request_id: str
+    stages: tuple[str, ...]
+    intent: str
+    goal: str
+    plan_id: str
+    authorized_tools: tuple[str, ...]
+    evidence_count: int
+    draft_generated: bool
+    verification_verdict: EdgeDecision
+    policy_verdict: EdgeDecision
+    response_released: bool
+    sealed: bool = True
+
+
+class ToolExecutionBoundaryContract(BaseModel):
+    """Policy-controlled tool plan; no capability is executed implicitly."""
+
+    requested_tools: tuple[str, ...]
+    authorized_tools: tuple[str, ...]
+    executed_tools: tuple[str, ...] = ()
+    sandbox_required: bool = True
+    side_effects_permitted: bool = False
+
+
 class AuditEvent(BaseModel):
     stage: str
     status: str
@@ -183,7 +260,13 @@ class AgentResult(BaseModel):
     decisions: list[DecisionContract]
     evidence: list[EvidenceContract]
     verification_contract: VerificationContract
-    audit_events: list[AuditEvent]
+    model_fallback: ModelFallbackContract
+    learning_lifecycle: LearningLifecycleContract
+    response_release: ResponseReleaseContract
+    canonical_state: CanonicalExecutionStateContract
+    tool_boundary: ToolExecutionBoundaryContract
+    audit_events: tuple[AuditEvent, ...]
+    audit_digest: str
     response_governance: list[str]
     production_gate: str
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
