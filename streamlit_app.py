@@ -32,6 +32,7 @@ if "generated_api_key_fingerprint" not in st.session_state:
 # =========================================================
 
 st.title("🤖 AT LLM — AI Agent Platform")
+
 st.caption(
     "Architecture-aligned deterministic agent orchestration "
     "with policy, verification, evidence and audit controls."
@@ -43,6 +44,7 @@ st.caption(
 # =========================================================
 
 with st.sidebar:
+
     st.header("⚙️ Agent Configuration")
 
     channel = st.selectbox(
@@ -53,31 +55,9 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader("🔐 API Key Generator")
-
-    if st.button(
-        "Generate API Key",
-        use_container_width=True,
-        type="primary",
-    ):
-        key = generate_api_key()
-
-        st.session_state.generated_api_key = key
-        st.session_state.generated_api_key_fingerprint = (
-            fingerprint_api_key(key)
-        )
-
-
-with st.sidebar:
-    st.header("⚙️ Agent Configuration")
-
-    channel = st.selectbox(
-        "Channel",
-        options=[c.value for c in Channel],
-        index=0,
-    )
-
-    st.divider()
+    # -----------------------------------------------------
+    # API KEY GENERATOR
+    # -----------------------------------------------------
 
     st.subheader("🔐 API Key Generator")
 
@@ -94,6 +74,7 @@ with st.sidebar:
         )
 
     if st.session_state.generated_api_key:
+
         st.success("API key generated.")
 
         st.code(
@@ -121,6 +102,10 @@ with st.sidebar:
 
     st.divider()
 
+    # -----------------------------------------------------
+    # ROUTES
+    # -----------------------------------------------------
+
     st.subheader("Available Routes")
 
     for route in ROUTES:
@@ -139,9 +124,7 @@ st.subheader("Agent Request")
 
 query = st.text_area(
     "Enter your request",
-    placeholder=(
-        "Example: Analyze dashboard metrics for retention"
-    ),
+    placeholder="Example: Analyze dashboard metrics for retention",
     height=140,
 )
 
@@ -155,12 +138,17 @@ if st.button(
     type="primary",
     use_container_width=True,
 ):
+
     if not query.strip():
         st.warning("Please enter a request.")
         st.stop()
 
     try:
-        # Run the async agent entrypoint
+
+        # -------------------------------------------------
+        # ASYNC AGENT ENTRYPOINT
+        # -------------------------------------------------
+
         result = asyncio.run(
             run_agent(
                 prompt=query,
@@ -171,7 +159,7 @@ if st.button(
         st.divider()
 
         # -------------------------------------------------
-        # RESULT
+        # ANSWER
         # -------------------------------------------------
 
         st.subheader("Answer")
@@ -190,14 +178,12 @@ if st.button(
             st.metric(
                 "Route",
                 result.route,
-                result.route.name,
             )
 
         with col2:
             st.metric(
                 "Domain",
                 result.route_contract.domain,
-                result.route.domain,
             )
 
         with col3:
@@ -207,36 +193,35 @@ if st.button(
             )
 
         # -------------------------------------------------
-        # DECISION
+        # DECISIONS
         # -------------------------------------------------
 
         st.subheader("Decision")
 
-        st.json(
-            [
-                d.model_dump(mode="json")
-                if hasattr(d, "model_dump")
-                else d
-                for d in result.decisions
-            ]
-        )
+        if result.decisions:
 
-        decision = result.decision
+            for decision in result.decisions:
 
-        st.json(
-            decision.model_dump(mode="json")
-            if hasattr(decision, "model_dump")
-            else decision
-        )
+                if hasattr(decision, "model_dump"):
+                    st.json(
+                        decision.model_dump(mode="json")
+                    )
+                else:
+                    st.json(decision)
+
+        else:
+            st.info("No decision records available.")
 
         # -------------------------------------------------
         # EVIDENCE
         # -------------------------------------------------
 
         if result.evidence:
+
             st.subheader("Evidence")
 
             for evidence in result.evidence:
+
                 if hasattr(evidence, "model_dump"):
                     st.json(
                         evidence.model_dump(mode="json")
@@ -251,12 +236,91 @@ if st.button(
         st.subheader("Audit Trail")
 
         if result.steps:
+
             for step in result.steps:
                 st.markdown(f"- {step}")
+
         else:
             st.info("No audit events available.")
 
+        # -------------------------------------------------
+        # GOVERNANCE DETAILS
+        # -------------------------------------------------
+
+        with st.expander("Governance Details"):
+
+            st.write(
+                "Confidence:",
+                result.confidence,
+            )
+
+            st.write(
+                "Policy:",
+                result.policy_contract.verdict.value,
+            )
+
+            st.write(
+                "Risk:",
+                result.route_contract.risk.value,
+            )
+
+            st.write(
+                "Data Classification:",
+                result.route_contract.data_classification.value,
+            )
+
+            st.write(
+                "Production Gate:",
+                result.production_gate,
+            )
+
+            st.write(
+                "Response Released:",
+                result.response_release.released,
+            )
+
+            st.write(
+                "Authorized Tools:",
+                list(result.tool_boundary.authorized_tools),
+            )
+
+            st.write(
+                "Executed Tools:",
+                list(result.tool_boundary.executed_tools),
+            )
+
+        # -------------------------------------------------
+        # CANONICAL STATE
+        # -------------------------------------------------
+
+        with st.expander("Canonical Execution State"):
+
+            if hasattr(result.canonical_state, "model_dump"):
+                st.json(
+                    result.canonical_state.model_dump(
+                        mode="json"
+                    )
+                )
+            else:
+                st.write(result.canonical_state)
+
+        # -------------------------------------------------
+        # VERIFICATION
+        # -------------------------------------------------
+
+        with st.expander("Verification"):
+
+            if hasattr(result.verification_contract, "model_dump"):
+                st.json(
+                    result.verification_contract.model_dump(
+                        mode="json"
+                    )
+                )
+            else:
+                st.write(result.verification_contract)
+
     except Exception as exc:
+
         st.error("Agent execution failed.")
 
         with st.expander("Technical Error"):
