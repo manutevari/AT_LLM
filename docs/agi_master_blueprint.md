@@ -69,6 +69,8 @@ flowchart LR
 - Add a cognitive-cycle trace to every run: perception, understanding,
   reasoning, planning, action decision, reflection, and evaluation state.
 - Preserve the current deterministic L3 execution path as the safe baseline.
+- Seal the canonical state and audit digest only after the verification and
+  final-policy release path completes; drafts remain internal artifacts.
 
 ### Phase 2 — Stateful knowledge and memory
 

@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
@@ -18,6 +20,7 @@ from .api_keys import (
 from .contracts import (
     AgentResult,
     AuditEvent,
+    CanonicalExecutionStateContract,
     Channel,
     DataClassification,
     DecisionContract,
@@ -28,6 +31,9 @@ from .contracts import (
     LearningLifecycleContract,
     ModelAttemptContract,
     ModelFallbackContract,
+    LearningLifecycleContract,
+    ModelFallbackContract,
+    ResponseReleaseContract,
     InputContract,
     IntentContract,
     PlanContract,
@@ -36,8 +42,12 @@ from .contracts import (
     RouteContract,
     RuntimeStateContract,
     SignalContract,
+    ToolExecutionBoundaryContract,
     VerificationContract,
 )
+from .response import build_response_draft, release_final_response
+from .model_gateway import select_model_fallback
+from .tool_gateway import authorize_tool_plan
 
 
 SYSTEM_PROMPT = """
@@ -857,6 +867,9 @@ def _build_model_fallback(
             ),
         ],
     )
+    """Compatibility wrapper around the provider-neutral model gateway."""
+
+    return select_model_fallback(policy)
 
 
 def _build_learning_lifecycle() -> LearningLifecycleContract:
@@ -868,6 +881,63 @@ def _build_learning_lifecycle() -> LearningLifecycleContract:
         promotion_status="candidate_only",
         policy_can_be_modified=False,
     )
+
+
+def _build_tool_boundary(
+    route: RouteDefinition,
+    policy: PolicyContract,
+) -> ToolExecutionBoundaryContract:
+    """Expose an authorized tool plan without granting implicit execution."""
+
+    return authorize_tool_plan(route.tools, policy)
+
+
+def _seal_canonical_state(
+    *,
+    input_contract: InputContract,
+    intent: IntentContract,
+    plan: PlanContract,
+    tool_boundary: ToolExecutionBoundaryContract,
+    evidence: List[EvidenceContract],
+    verification: VerificationContract,
+    policy: PolicyContract,
+    response_release: ResponseReleaseContract,
+) -> CanonicalExecutionStateContract:
+    """Seal the authoritative state after the response lifecycle completes."""
+
+    return CanonicalExecutionStateContract(
+        request_id=input_contract.session_id,
+        stages=(
+            "request",
+            "intent",
+            "goal",
+            "plan",
+            "tools",
+            "evidence",
+            "draft",
+            "verification",
+            "policy",
+            "response",
+        ),
+        intent=intent.intent,
+        goal=intent.goals[0] if intent.goals else "",
+        plan_id=plan.orchestrator,
+        authorized_tools=tool_boundary.authorized_tools,
+        evidence_count=len(evidence),
+        draft_generated=True,
+        verification_verdict=verification.verdict,
+        policy_verdict=response_release.final_policy_verdict,
+        response_released=response_release.released,
+    )
+
+
+def _audit_digest(events: List[AuditEvent]) -> str:
+    """Return a tamper-evident digest for the immutable audit payload."""
+
+    payload = [event.model_dump(mode="json") for event in events]
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 # =========================================================
@@ -905,6 +975,7 @@ def _build_audit(
     production_gate: str,
     api_key_fingerprint: str | None = None,
     model_fallback: ModelFallbackContract | None = None,
+    response_release: ResponseReleaseContract | None = None,
 ) -> List[AuditEvent]:
 
     stages = [
@@ -1034,8 +1105,9 @@ def _build_audit(
         ),
         (
             "synthesis_engine",
+            "response_generation",
             "ok",
-            "Candidate response synthesized.",
+            "Candidate draft generated; it is not user-facing.",
         ),
         (
             "verification_manager",
@@ -1053,8 +1125,15 @@ def _build_audit(
         ),
         (
             "final_policy_gate",
-            production_gate.lower(),
-            f"Production gate: {production_gate}.",
+            (
+                response_release.final_policy_verdict.value
+                if response_release
+                else production_gate.lower()
+            ),
+            (
+                f"Final response released after verification and policy: "
+                f"{production_gate}."
+            ),
         ),
         (
             "security_control_plane",
@@ -1212,6 +1291,7 @@ async def run_agent(
 
     model_fallback = _build_model_fallback(policy)
     learning_lifecycle = _build_learning_lifecycle()
+    tool_boundary = _build_tool_boundary(route, policy)
 
     # -----------------------------------------------------
     # Decisions
@@ -1320,6 +1400,18 @@ async def run_agent(
     # The cryptographic generator itself is the execution source.
 
     # -----------------------------------------------------
+    # Draft generation (not user-facing)
+    # -----------------------------------------------------
+
+    draft = build_response_draft(
+        route=route_contract,
+        plan=plan,
+        policy=policy,
+        generated_api_key=generated_api_key,
+        api_key_fingerprint=api_key_fingerprint,
+    )
+
+    # -----------------------------------------------------
     # Verification
     # -----------------------------------------------------
 
@@ -1342,10 +1434,20 @@ async def run_agent(
         EdgeDecision.allowed
         if (
             not route.requires_rag
-            or len(evidence) > 0
+            or any(
+                item.source_id != "pending_verified_source"
+                for item in evidence
+            )
         )
         else EdgeDecision.escalate
     )
+
+    if (
+        policy.verdict == EdgeDecision.allowed
+        and evidence_verdict != EdgeDecision.allowed
+    ):
+        verification_verdict = EdgeDecision.escalate
+        verified = False
 
     verification = VerificationContract(
         evidence=evidence_verdict,
@@ -1359,7 +1461,10 @@ async def run_agent(
             EdgeDecision.allowed
             if (
                 not route.requires_rag
-                or len(evidence) > 0
+                or any(
+                    item.source_id != "pending_verified_source"
+                    for item in evidence
+                )
             )
             else EdgeDecision.escalate
         ),
@@ -1374,93 +1479,26 @@ async def run_agent(
     )
 
     # -----------------------------------------------------
-    # Response
+    # Final policy gate and user-facing release
     # -----------------------------------------------------
 
-    if policy.verdict == EdgeDecision.blocked:
+    answer, response_release = release_final_response(
+        draft=draft,
+        policy=policy,
+        verification=verification,
+    )
+    production_gate = response_release.production_gate
 
-        answer = (
-            "The request was blocked by the Policy Manager. "
-            "The system will not perform credential abuse, "
-            "authentication bypass, malware development, "
-            "or other prohibited activity. "
-            "Execution status: blocked by policy."
-        )
-
-        production_gate = "BLOCK"
-
-    elif policy.verdict == EdgeDecision.escalate:
-
-        answer = (
-            f"Architecture-aligned route: {route.name} "
-            f"in the {route.domain} domain. "
-            f"Topology: {route.topology.value} | "
-            f"Assigned agent: {route_contract.agent} | "
-            f"Model policy: {route.model}. "
-            f"Policy Manager verdict: "
-            f"{policy.verdict.value} | "
-            f"Constraints: "
-            f"{', '.join(policy.constraints)}. "
-            f"Data classification: "
-            f"{data_classification.value} | "
-            f"Risk: {risk.value}. "
-            f"Verification verdict: "
-            f"{verification.verdict.value}. "
-            "Execution status: requires human review "
-            "or clarification. "
-            "No external side effect was executed. "
-            "Production gate: CONDITIONAL."
-        )
-
-        production_gate = "CONDITIONAL"
-
-    elif route.name == "API Key":
-
-        answer = (
-            "API key generated successfully.\n\n"
-            f"API Key:\n"
-            f"{generated_api_key}\n\n"
-            "Security notice: this secret is displayed only "
-            "in the current response and is not written to "
-            "the audit trail.\n\n"
-            f"Key fingerprint: "
-            f"{api_key_fingerprint}\n"
-            "The key has NOT been registered, activated, "
-            "stored in an external secret manager, or granted "
-            "permissions."
-        )
-
-        production_gate = "PASS"
-
-    else:
-
-        answer = (
-            f"Architecture-aligned route: {route.name} "
-            f"in the {route.domain} domain. "
-            f"Topology: {route.topology.value} | "
-            f"Assigned agent: {route_contract.agent} | "
-            f"Model policy: {route.model}. "
-            f"Policy Manager verdict: "
-            f"{policy.verdict.value} | "
-            f"Constraints: "
-            f"{', '.join(policy.constraints)}. "
-            f"Manager fabric: "
-            f"{', '.join(plan.manager_fabric)}. "
-            f"Tools planned: "
-            f"{', '.join(route.tools)}. "
-            f"Data classification: "
-            f"{data_classification.value} | "
-            f"Risk: {risk.value}. "
-            f"Verification verdict: "
-            f"{verification.verdict.value} | "
-            f"Runtime state: "
-            f"{runtime_state.state_id}. "
-            "Execution status: passed validation. "
-            "Production gate: PASS. "
-            "No unapproved external side effect was executed."
-        )
-
-        production_gate = "PASS"
+    canonical_state = _seal_canonical_state(
+        input_contract=input_contract,
+        intent=intent,
+        plan=plan,
+        tool_boundary=tool_boundary,
+        evidence=evidence,
+        verification=verification,
+        policy=policy,
+        response_release=response_release,
+    )
 
     # -----------------------------------------------------
     # Audit
@@ -1474,7 +1512,9 @@ async def run_agent(
         production_gate=production_gate,
         api_key_fingerprint=api_key_fingerprint,
         model_fallback=model_fallback,
+        response_release=response_release,
     )
+    audit_digest = _audit_digest(audit_events)
 
     # -----------------------------------------------------
     # Final result
@@ -1498,6 +1538,11 @@ async def run_agent(
         model_fallback=model_fallback,
         learning_lifecycle=learning_lifecycle,
         audit_events=audit_events,
+        response_release=response_release,
+        canonical_state=canonical_state,
+        tool_boundary=tool_boundary,
+        audit_events=tuple(audit_events),
+        audit_digest=audit_digest,
         response_governance=[
             "policy_checked",
             "provenance_required",

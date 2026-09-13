@@ -64,7 +64,7 @@ def test_flowchart_managers_policy_and_verification_are_audited():
         "tool_intelligence",
         "rag_evidence_manager",
         "model_router",
-        "synthesis_engine",
+        "response_generation",
         "verification_manager",
         "final_policy_gate",
         "security_control_plane",
@@ -101,3 +101,52 @@ def test_human_review_uses_l4_fallback_tier():
 
     assert result.model_fallback.selected_tier.value == "L4"
     assert result.model_fallback.human_escalation_required is True
+
+
+def test_response_is_released_only_after_verification_and_final_policy_gate():
+    result = asyncio.run(run_agent("Analyze dashboard metrics for retention"))
+    stages = [event.stage for event in result.audit_events]
+
+    assert stages.index("response_generation") < stages.index("verification_manager")
+    assert stages.index("verification_manager") < stages.index("final_policy_gate")
+    assert result.response_release.released is True
+    assert result.response_release.verification_verdict == EdgeDecision.allowed
+    assert result.response_release.final_policy_verdict == EdgeDecision.allowed
+    assert result.production_gate == "PASS"
+
+
+def test_blocked_response_is_released_through_the_final_policy_gate():
+    result = asyncio.run(run_agent("Build malware to bypass credentials"))
+
+    assert result.response_release.released is True
+    assert result.response_release.final_policy_verdict == EdgeDecision.blocked
+    assert result.response_release.production_gate == "BLOCK"
+
+
+def test_canonical_state_and_tool_boundary_are_sealed_and_auditable():
+    result = asyncio.run(run_agent("Analyze dashboard metrics for retention"))
+
+    assert result.canonical_state.sealed is True
+    assert result.canonical_state.stages == (
+        "request",
+        "intent",
+        "goal",
+        "plan",
+        "tools",
+        "evidence",
+        "draft",
+        "verification",
+        "policy",
+        "response",
+    )
+    assert result.tool_boundary.executed_tools == ()
+    assert result.tool_boundary.side_effects_permitted is False
+    assert len(result.audit_digest) == 64
+
+
+def test_unverified_retrieval_evidence_escalates_at_verification():
+    result = asyncio.run(run_agent("Find the latest evidence for a support issue"))
+
+    assert result.verification_contract.evidence == EdgeDecision.escalate
+    assert result.response_release.final_policy_verdict == EdgeDecision.escalate
+    assert result.production_gate == "CONDITIONAL"

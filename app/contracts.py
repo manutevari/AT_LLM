@@ -194,6 +194,50 @@ class LearningLifecycleContract(BaseModel):
     policy_can_be_modified: bool = False
 
 
+class ResponseDraftContract(BaseModel):
+    """Candidate response that must not be released directly to a user."""
+
+    content: str
+    generator: str
+    contains_secret: bool = False
+
+
+class ResponseReleaseContract(BaseModel):
+    """Outcome of verification and the final policy gate."""
+
+    verification_verdict: EdgeDecision
+    final_policy_verdict: EdgeDecision
+    released: bool
+    production_gate: str
+
+
+class CanonicalExecutionStateContract(BaseModel):
+    """Authoritative, sealed summary of the governed execution lifecycle."""
+
+    request_id: str
+    stages: tuple[str, ...]
+    intent: str
+    goal: str
+    plan_id: str
+    authorized_tools: tuple[str, ...]
+    evidence_count: int
+    draft_generated: bool
+    verification_verdict: EdgeDecision
+    policy_verdict: EdgeDecision
+    response_released: bool
+    sealed: bool = True
+
+
+class ToolExecutionBoundaryContract(BaseModel):
+    """Policy-controlled tool plan; no capability is executed implicitly."""
+
+    requested_tools: tuple[str, ...]
+    authorized_tools: tuple[str, ...]
+    executed_tools: tuple[str, ...] = ()
+    sandbox_required: bool = True
+    side_effects_permitted: bool = False
+
+
 class AuditEvent(BaseModel):
     stage: str
     status: str
@@ -219,6 +263,11 @@ class AgentResult(BaseModel):
     model_fallback: ModelFallbackContract
     learning_lifecycle: LearningLifecycleContract
     audit_events: list[AuditEvent]
+    response_release: ResponseReleaseContract
+    canonical_state: CanonicalExecutionStateContract
+    tool_boundary: ToolExecutionBoundaryContract
+    audit_events: tuple[AuditEvent, ...]
+    audit_digest: str
     response_governance: list[str]
     production_gate: str
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

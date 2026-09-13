@@ -7,6 +7,10 @@ normalization, contracts, understanding, signals, routing, policy, evidence,
 verification, audit, L0–L4 fallback planning, and candidate-only learning.
 It does not claim to be human-level AGI.
 
+The final response is generated as an internal draft and is released to the
+user only after the verification engine and final policy gate approve the
+outcome.
+
 ## What is included
 
 - **Streamlit operator console** for launching agent runs and inspecting response, contracts, routing, evidence, and audit tabs.

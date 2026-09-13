@@ -8,6 +8,26 @@ This implementation follows the supplied end-to-end flowchart as an executable, 
 
 ## Runtime flow
 
+The response path is intentionally separated from orchestration: **User →
+AI4UOnly UI → AT_LLM API → Cognitive Agent Router → Intent/Goal/Policy →
+Reasoning → Model Gateway (L0/L1/L2/L3/L4) → Draft Generation → Verification
+Engine → Final Policy Gate → Final Response**. Drafts are internal candidate
+artifacts; only the response-release component can emit final user-facing
+text after verification and the final policy decision.
+
+## Implementation requirements coverage
+
+| Requirement | Current implementation |
+| --- | --- |
+| Authoritative state | `CanonicalExecutionStateContract` seals the request → intent → goal → plan → tools → evidence → draft → verification → policy → response lifecycle. |
+| Strict I/O contracts | Pydantic contracts define the boundary between orchestration, model gateway, response generation, verification, and release. |
+| Model gateway | `app.model_gateway` owns provider-neutral L0–L4 selection; agents do not call providers directly. |
+| Response separation | `app.response` constructs internal drafts and is the only component that releases final text after verification and policy. |
+| Tool execution boundary | `app.tool_gateway` produces `ToolExecutionBoundaryContract` records; no tool or side effect is implicitly executed. |
+| HITL | Policy or verification escalation selects L4 and a conditional release path for ambiguity, high-risk work, or unverified evidence. |
+| Learning safety | Learning remains candidate-only and cannot modify policy; memory, skills, and policy remain distinct boundaries. |
+| Auditability | The audit trace is returned as an immutable tuple with a SHA-256 tamper-evident digest. |
+
 ```mermaid
 flowchart TB
   USER[User / Organization] --> CHANNEL[Interaction Channels: Web / Chat / Mobile / Voice / API / Files]
