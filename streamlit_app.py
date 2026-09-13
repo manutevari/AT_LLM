@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import streamlit as st
 
 from app.agent import ROUTES, run_agent
@@ -39,6 +41,32 @@ st.caption(
 # =========================================================
 # SIDEBAR
 # =========================================================
+
+with st.sidebar:
+    st.header("⚙️ Agent Configuration")
+
+    channel = st.selectbox(
+        "Channel",
+        options=[c.value for c in Channel],
+        index=0,
+    )
+
+    st.divider()
+
+    st.subheader("🔐 API Key Generator")
+
+    if st.button(
+        "Generate API Key",
+        use_container_width=True,
+        type="primary",
+    ):
+        key = generate_api_key()
+
+        st.session_state.generated_api_key = key
+        st.session_state.generated_api_key_fingerprint = (
+            fingerprint_api_key(key)
+        )
+
 
 with st.sidebar:
     st.header("⚙️ Agent Configuration")
@@ -132,6 +160,11 @@ if st.button(
         st.stop()
 
     try:
+        result = asyncio.run(
+            run_agent(
+                prompt=query,
+                channel=Channel(channel),
+            )
         result = run_agent(
             query=query,
             channel=channel,
@@ -158,12 +191,14 @@ if st.button(
         with col1:
             st.metric(
                 "Route",
+                result.route,
                 result.route.name,
             )
 
         with col2:
             st.metric(
                 "Domain",
+                result.route_contract.domain,
                 result.route.domain,
             )
 
@@ -179,6 +214,13 @@ if st.button(
 
         st.subheader("Decision")
 
+        st.json(
+            [
+                decision.model_dump(mode="json")
+                if hasattr(decision, "model_dump")
+                else decision
+                for decision in result.decisions
+            ]
         decision = result.decision
 
         st.json(
