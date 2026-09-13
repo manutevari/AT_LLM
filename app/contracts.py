@@ -262,6 +262,7 @@ class AgentResult(BaseModel):
     verification_contract: VerificationContract
     model_fallback: ModelFallbackContract
     learning_lifecycle: LearningLifecycleContract
+    audit_events: list[AuditEvent]
     response_release: ResponseReleaseContract
     canonical_state: CanonicalExecutionStateContract
     tool_boundary: ToolExecutionBoundaryContract

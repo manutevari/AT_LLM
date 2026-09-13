@@ -27,6 +27,10 @@ from .contracts import (
     EdgeDecision,
     EvidenceContract,
     ExecutionTopology,
+    FallbackTier,
+    LearningLifecycleContract,
+    ModelAttemptContract,
+    ModelFallbackContract,
     LearningLifecycleContract,
     ModelFallbackContract,
     ResponseReleaseContract,
@@ -807,6 +811,62 @@ def _build_runtime_state() -> RuntimeStateContract:
 def _build_model_fallback(
     policy: PolicyContract,
 ) -> ModelFallbackContract:
+    """Describe the provider-neutral L0-L4 execution plan.
+
+    This deterministic starter intentionally does not make unconfigured
+    network model calls. L3 is therefore the active safe execution tier;
+    L0-L2 remain explicit, auditable integration points rather than claims
+    that an external provider was invoked.
+    """
+
+    if policy.verdict == EdgeDecision.escalate:
+        return ModelFallbackContract(
+            selected_tier=FallbackTier.l4_human,
+            human_escalation_required=True,
+            attempts=[
+                ModelAttemptContract(
+                    tier=FallbackTier.l4_human,
+                    provider="human-in-the-loop",
+                    model="human-review",
+                    status="required",
+                    reason="Policy requires clarification or human review.",
+                )
+            ],
+        )
+
+    return ModelFallbackContract(
+        selected_tier=FallbackTier.l3_deterministic,
+        attempts=[
+            ModelAttemptContract(
+                tier=FallbackTier.l0_primary,
+                provider="openrouter",
+                model="openrouter/auto",
+                status="not_configured",
+                reason="No configured OpenRouter credential or adapter.",
+            ),
+            ModelAttemptContract(
+                tier=FallbackTier.l1_secondary,
+                provider="secondary-provider",
+                model="configured-provider",
+                status="not_configured",
+                reason="No secondary provider adapter is configured.",
+            ),
+            ModelAttemptContract(
+                tier=FallbackTier.l2_local,
+                provider="local-inference",
+                model="ollama-or-vllm",
+                status="not_configured",
+                reason="No local inference adapter is configured.",
+            ),
+            ModelAttemptContract(
+                tier=FallbackTier.l3_deterministic,
+                provider="at_llm",
+                model="deterministic-contract-engine",
+                status="selected",
+                reason="Safe local deterministic control-plane execution.",
+            ),
+        ],
+    )
     """Compatibility wrapper around the provider-neutral model gateway."""
 
     return select_model_fallback(policy)
@@ -1044,6 +1104,7 @@ def _build_audit(
             ),
         ),
         (
+            "synthesis_engine",
             "response_generation",
             "ok",
             "Candidate draft generated; it is not user-facing.",
@@ -1476,6 +1537,7 @@ async def run_agent(
         verification_contract=verification,
         model_fallback=model_fallback,
         learning_lifecycle=learning_lifecycle,
+        audit_events=audit_events,
         response_release=response_release,
         canonical_state=canonical_state,
         tool_boundary=tool_boundary,
